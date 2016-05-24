@@ -1,0 +1,510 @@
+#!/usr/bin/env python
+"""
+Core Network Bootstrapper
+"""
+
+# Standard imports
+import ConfigParser
+import string
+import struct
+import subprocess
+import sys
+import threading
+import time
+
+# 3rd party imports
+import BaseHTTPServer
+import crypt
+import ipaddress
+import paramiko
+
+# Disable long line warnings
+# pylint: disable=C0301
+
+# Root password set in the pressed and used to provision
+ROOT_PASSWORD = 'password'
+
+# Port the HTTP preseed server will listen on
+SERVER_PORT = 8088
+
+# Default configuration
+PUPPET_CONF = {
+    'main' : {
+        'logdir': '/var/log/puppet',
+        'vardir': '/var/lib/puppet',
+        'ssldir': '/var/lib/puppet/ssl',
+        'rundir': '/var/run/puppet',
+    },
+}
+
+# CA configuration
+PUPPET_CONF_CA = {
+    'main' : {
+        'logdir': '/var/log/puppet',
+        'vardir': '/var/lib/puppet',
+        'ssldir': '/var/lib/puppet/ssl',
+        'rundir': '/var/run/puppet',
+    },
+    'master': {
+        'environmentpath': '$confdir/environments',
+    },
+}
+
+# Gateway configuration, specifies DNS Alternate Names for X.509 generation
+PUPPET_CONF_GATEWAY = {
+    'main' : {
+        'logdir': '/var/log/puppet',
+        'vardir': '/var/lib/puppet',
+        'ssldir': '/var/lib/puppet/ssl',
+        'rundir': '/var/run/puppet',
+        'dns_alt_names': '*,*.example.com,*.staging.datacentred.services',
+    },
+}
+
+def info(message):
+    """Echos a message to stdout with infomational priority"""
+
+    sys.stdout.write("[1;32m>>> {}[0m".format(message))
+    if message[-1] != "\n":
+        sys.stdout.write("\n")
+
+
+def detail(message):
+    """Echos a message to stdout with detail priority"""
+
+    sys.stdout.write("  [1m>>> {}[0m".format(message))
+    if message[-1] != "\n":
+        sys.stdout.write("\n")
+
+
+class HTTPRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
+    """Handler class for HTTP requests"""
+
+    # Disable illegal function name warnings
+    # pylint: disable=C0103
+    def do_GET(self):
+        """Responds to HTTP GET requests"""
+
+        if self.path == '/preseed':
+            with open('templates/preseed', 'r') as fd:
+                preseed = string.Template(fd.read())
+            self.send_response(200)
+            self.send_header('Content-type', 'text/html')
+            self.end_headers()
+            self.wfile.write(preseed.safe_substitute(
+                root_password=crypt.crypt(ROOT_PASSWORD, '$6$salt'),
+                finish_url='http://{}:{}/finish'.format(
+                    self.server.server_name, self.server.server_port)))
+        elif self.path == '/finish':
+            with open('templates/finish', 'r') as fd:
+                finish = fd.read()
+            self.send_response(200)
+            self.send_header('Content-type', 'text/html')
+            self.end_headers()
+            self.wfile.write(finish)
+        else:
+            self.send_error(404)
+
+
+class WebServer(object):
+    """Container for webserver functionality"""
+
+    @staticmethod
+    def server_main(**kwargs):
+        """Server thread entry point"""
+
+        server = BaseHTTPServer.HTTPServer((kwargs['addr'], kwargs['port']), HTTPRequestHandler)
+        server.serve_forever()
+
+
+    @staticmethod
+    def start(addr, port):
+        """Webserver entry point"""
+
+        kwargs = {
+            'addr': addr,
+            'port': port
+        }
+        http_server = threading.Thread(target=WebServer.server_main, kwargs=kwargs)
+        http_server.daemon = True
+        http_server.start()
+
+
+class Subnet(object):
+    """Container for a sub network"""
+
+    def __init__(self, subnet, gateway, nameserver):
+        """Initialise a subnet"""
+
+        self.subnet = ipaddress.IPv4Network(subnet)
+        self.gateway = ipaddress.IPv4Address(gateway)
+        self.nameserver = ipaddress.IPv4Address(nameserver)
+        self.allocations = [self.gateway]
+
+
+    def get_netmask(self):
+        """Return the subnet mask"""
+
+        return self.subnet.netmask
+
+
+    def get_gateway(self):
+        """Return the default gateway"""
+
+        return self.gateway.exploded
+
+
+    def set_nameserver(self, nameserver):
+        """Set the nameserver"""
+
+        self.nameserver = ipaddress.IPv4Address(nameserver)
+
+
+    def get_nameserver(self):
+        """Get the nameserver"""
+
+        return self.nameserver.exploded
+
+
+    def allocate_address(self, fixed=False):
+        """Try allocate a fixed address, or dynamic if not defined"""
+        if fixed:
+            address = ipaddress.IPv4Address(fixed)
+            if address not in self.subnet:
+                raise ValueError('address not in subnet')
+            if address in self.allocations:
+                raise ValueError('address allocation already exists')
+        else:
+            # Get the network prefix and convert to an integer
+            iaddress = struct.unpack('>I', self.subnet.network_address.packed)[0]
+            # Increment through the subnet and look for a spare address
+            # Note: num_addresses is 255 for a /24, by incrementing by 1 if no
+            # allocations are found then address is the boradcast address and
+            # we can trap the error condition
+            for _ in range(1, self.subnet.num_addresses + 1):
+                iaddress = iaddress + 1
+                address = ipaddress.IPv4Address(struct.pack('>I', iaddress))
+                if address not in self.allocations:
+                    break
+            if address == self.subnet.broadcast_address:
+                raise OverflowError('no free addresses')
+        self.allocations.append(address)
+        return address.exploded
+
+
+class Host(object):
+    """Container for a host object"""
+
+    def __init__(self, name, subnet, **kwargs):
+        """Initialise a host"""
+
+        self.name = name
+        self.subnet = subnet
+        self.address = self.subnet.allocate_address(kwargs.get('address', False))
+        self.ram = kwargs.get('ram', 512)
+        self.disk = kwargs.get('disk', 8)
+
+
+    def exists(self):
+        """Check if a host exists"""
+
+        lines = subprocess.check_output(['virsh', 'list', '--all']).split("\n")[2:-2]
+        for line in lines:
+            if self.name in line:
+                return True
+        return False
+
+
+    def create(self):
+        """Create a host, blocking until it is provisioned and SSH is running"""
+
+        info('Creating host {} ...'.format(self.name))
+        detail('Memory  {} MB'.format(self.ram))
+        detail('Disk    {} GB'.format(self.disk))
+        detail('Address {}'.format(self.address))
+        detail('Netmask {}'.format(self.subnet.get_netmask()))
+        detail('Gateway {}'.format(self.subnet.get_gateway()))
+        detail('DNS     {}'.format(self.subnet.get_nameserver()))
+
+        extra_args = [
+            'auto=true',
+            'priority=critical',
+            'vga=normal',
+            'hostname={}'.format(self.name),
+            'domain=example.com',
+            'url=http://{}:{}/preseed'.format(self.subnet.get_gateway(), SERVER_PORT),
+            'netcfg/choose_interface=auto',
+            'netcfg/disable_autoconfig=true',
+            'netcfg/get_ipaddress={}'.format(self.address),
+            'netcfg/get_netmask={}'.format(self.subnet.get_netmask()),
+            'netcfg/get_gateway={}'.format(self.subnet.get_gateway()),
+            'netcfg/get_nameservers={}'.format(self.subnet.get_nameserver()),
+            'netcfg/confirm_static=true'
+        ]
+
+        command = [
+            'virt-install',
+            #'--debug', # Debug output to .cache/virt-manager/virt-install.log
+            '--name', self.name,
+            '--ram', '{}'.format(self.ram),
+            '--controller', 'type=scsi,model=virtio-scsi', # Needed for ceph provisioning
+            '--disk', '{}.img,size={},bus=scsi'.format(self.name, self.disk),
+            '--location', 'http://gb.archive.ubuntu.com/ubuntu/dists/trusty/main/installer-amd64',
+            '--network', 'bridge=br0',
+            '--extra-args', ' '.join(extra_args),
+            '--noautoconsole', # !!!!!! Causes operation to be non-blocking !!!!!!
+            '--serial', 'file,path=/tmp/{}.log'.format(self.name),
+            '--noreboot',
+        ]
+
+        info('Beginning host install ...')
+        subprocess.check_call(command)
+        done = False
+        delta = 0
+        for i in range(0, 1200):
+            delta = i
+            lines = subprocess.check_output(['virsh', 'list', '--all']).split("\n")[2:-2]
+            for line in lines:
+                if self.name in line and 'shut off' in line:
+                    done = True
+                    break
+            if done:
+                break
+            time.sleep(1)
+        if not done:
+            raise RuntimeError('instance took too long to provision')
+        detail('Completed in {}s'.format(delta))
+
+        command = [
+            'virsh',
+            'start',
+            self.name,
+        ]
+
+        info('Rebooting host ...')
+        subprocess.check_call(command)
+
+        done = False
+        for delta in range(0, 600):
+            command = ['nc', '-vz', self.address, '22']
+            try:
+                subprocess.check_call(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            except subprocess.CalledProcessError:
+                time.sleep(1)
+            else:
+                done = True
+                break
+        if not done:
+            raise RuntimeError('instance took too long to reboot')
+
+        sys.stderr.write("\n")
+        detail('Started in {}s'.format(delta))
+
+
+    def ssh(self, command, acceptable_exitcodes=[0]):
+        """SSH onto a host and execute a command"""
+
+        info('Executing on {}: {}'.format(self.name, command))
+        client = paramiko.client.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        client.connect(self.address, username='root', password=ROOT_PASSWORD)
+        channel = client.get_transport().open_session()
+        channel.set_combine_stderr(True)
+        channel.exec_command(command)
+        while True:
+            if channel.recv_ready():
+                sys.stdout.write(channel.recv(8192))
+            if channel.exit_status_ready():
+                break
+        detail("Exited with status {}".format(channel.recv_exit_status()))
+        if channel.recv_exit_status() not in acceptable_exitcodes:
+            raise RuntimeError('command execution failed')
+
+
+    def scp(self, source, target):
+        """SCP a local file to a host"""
+
+        info('Copying {} to {} on {}'.format(source, target, self.name))
+        client = paramiko.client.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        client.connect(self.address, username='root', password=ROOT_PASSWORD)
+        sftp = client.open_sftp()
+        sftp.put(source, target)
+
+
+    def install_puppet(self):
+        """Install puppet on the host"""
+
+        deb = 'puppetlabs-release-trusty.deb'
+        self.ssh(r'wget -O /tmp/{0} https://apt.puppet.com/{0}'.format(deb))
+        self.ssh(r'dpkg -i --force-all /tmp/{0}'.format(deb))
+        self.ssh(r'apt-get update')
+        # NOTE: install puppet (not puppet-common) as this is what Foreman does
+        # and is required by the manifest
+        # NOTE: alter foreman to install puppet-common and remove the hack!!
+        self.ssh(r'echo START=no > /etc/default/puppet')
+        self.ssh(r'apt-get -y -o DPkg::Options::=--force-confold install puppet')
+
+
+    def configure_puppet(self, config):
+        """Configure puppet"""
+
+        text = ''
+        for section in config:
+            text += "[{}]\n".format(section)
+            for option in config[section]:
+                text += "{}={}\n".format(option, config[section][option])
+        self.ssh('echo \'{}\' > /etc/puppet/puppet.conf'.format(text))
+
+
+    def install_puppet_modules(self, modules):
+        """Install puppet modules"""
+
+        if isinstance(modules, str):
+            modules = modules.split()
+        for module in modules:
+            self.ssh(r'puppet module install {}'.format(module))
+
+
+class DNS(object):
+    """Wrapper for DDNS functionality"""
+
+    # Disable invalid name warnings
+    # pylint: disable=C0103
+
+    def __init__(self, host):
+        self.host = host
+
+
+    def A(self, fqdn, ip):
+        """Add an A record"""
+
+        self.host.ssh('echo -e "server 127.0.0.1\nupdate add {} 604800 A {}\nsend" | nsupdate -k /etc/bind/rndc.key'.format(fqdn, ip))
+
+
+    def PTR(self, fqdn, ip):
+        """Add a PTR record"""
+
+        arpa = '.'.join(reversed(ip.split('.'))) + '.in-addr.arpa'
+        self.host.ssh('echo -e "server 127.0.0.1\nupdate add {} 604800 PTR {}\nsend" | nsupdate -k /etc/bind/rndc.key'.format(arpa, fqdn))
+
+
+    def default(self, host):
+        """Add default A and PTR records for a host"""
+
+        self.A(host.name, host.address)
+        self.PTR(host.name, host.address)
+
+
+def main():
+    """Where the magic happens"""
+
+    # Disable too many statements warning
+    # pylint: disable=R0915
+
+    config = ConfigParser.ConfigParser()
+    config.read('config')
+
+    # Fire up a webserver on the router to serve preseeds
+    WebServer.start(u'10.20.192.1', SERVER_PORT)
+
+    # Create the platform-services network, initially pointing at google for DNS
+    subnet = Subnet(u'10.20.192.0/24', u'10.20.192.1', u'8.8.8.8')
+
+    #########################################
+    # Host 1: Create the primary nameserver #
+    #########################################
+    ns0 = Host('ns0.example.com', subnet, address=u'10.20.192.250')
+    if not ns0.exists():
+        ns0.create()
+        ns0.install_puppet()
+        ns0.configure_puppet(PUPPET_CONF)
+        # Install prerequisite modules
+        ns0.install_puppet_modules('theforeman-dns')
+        # Install the manifest, and default hiera
+        ns0.scp('files/puppet/dns_master/manifest.pp', '/tmp/manifest.pp')
+        # Apply the manifest
+        ns0.ssh('puppet apply /tmp/manifest.pp')
+
+    # Update the subnet so subsequent hosts point at the nameserver
+    subnet.set_nameserver(ns0.address)
+
+    # Create the DNS helper
+    dns = DNS(ns0)
+
+    ################################
+    # Host 2: Create the puppet CA #
+    ################################
+    puppetca = Host('puppetca.example.com', subnet, address=u'10.20.192.3')
+    dns.default(puppetca)
+    if not puppetca.exists():
+        puppetca.create()
+        puppetca.install_puppet()
+        puppetca.configure_puppet(PUPPET_CONF_CA)
+        # Install prerequisite modules
+        puppetca.install_puppet_modules('puppetlabs-apache')
+        # Install the manifest, and default hiera
+        puppetca.scp('files/puppet/puppetca/manifest.pp', '/tmp/manifest.pp')
+        puppetca.scp('files/puppet/puppetca/common.yaml', '/var/lib/hiera/common.yaml')
+        # Install resources needed by the maifest
+        puppetca.scp('files/puppet/puppetca/hiera.yaml', '/tmp/hiera.yaml')
+        puppetca.scp('files/puppet/puppetca/public_key.pkcs7.pem', '/tmp/public_key.pkcs7.pem')
+        puppetca.scp('files/puppet/puppetca/private_key.pkcs7.pem', '/tmp/private_key.pkcs7.pem')
+        # Apply the manifest
+        puppetca.ssh('FACTER_deploy_user={} FACTER_deploy_pass={} puppet apply /tmp/manifest.pp'.\
+                     format(config.get('github', 'user')), format(config.get('github', 'pass')))
+
+    ############################
+    # Host 3: Create a gateway #
+    ############################
+    gateway0 = Host('gateway0.example.com', subnet, address=u'10.20.192.4')
+    dns.default(gateway0)
+    if not gateway0.exists():
+        gateway0.create()
+        gateway0.install_puppet()
+        gateway0.configure_puppet(PUPPET_CONF_GATEWAY)
+        # Install prerequisite modules
+        gateway0.install_puppet_modules(['puppetlabs-apt', 'puppetlabs-haproxy', 'arioch-keepalived'])
+        # Install the manifest
+        gateway0.scp('files/puppet/gateway/manifest.pp', '/tmp/manifest.pp')
+        # Generate the certificates
+        gateway0.ssh('puppet agent --test --server puppetca.example.com --tags non_existant')
+        # Apply the manifest
+        gateway0.ssh('puppet apply /tmp/manifest.pp')
+
+    #########################################
+    # Swing puppet behind the load-balancer #
+    #########################################
+    dns.A('puppet.example.com', '10.20.192.2')
+    puppetca.scp('files/puppet/puppetca/manifest-2.pp', '/tmp/manifest.pp')
+    puppetca.ssh('puppet apply /tmp/manifest.pp')
+
+    ######################################
+    # Host 4: Create the postgres master #
+    ######################################
+    # NOTE: Need at least 4GB RAM for PGSQL to provision without modification
+    postgres0 = Host('postgres0.example.com', subnet, address=u'10.20.192.5', ram=8192)
+    dns.default(postgres0)
+    if not postgres0.exists():
+        postgres0.create()
+        postgres0.install_puppet()
+        postgres0.configure_puppet(PUPPET_CONF)
+        # Exclude puppet as it will run there after via cron, however without a role and erase configuration
+        # Exclude icinga2 as it requires store configs to be working
+        postgres0.ssh('FACTER_excludes=::dc_profile::puppet::puppet,::dc_profile::mon::icinga2 FACTER_role=postgresql_master puppet agent --test', acceptable_exitcodes=[0, 2])
+
+    #####################################
+    # Host 5: Create the postgres slave #
+    #####################################
+    postgres1 = Host('postgres1.example.com', subnet, address=u'10.20.192.6', ram=8192)
+    dns.default(postgres1)
+    if not postgres1.exists():
+        postgres1.create()
+        postgres1.install_puppet()
+        postgres1.configure_puppet(PUPPET_CONF)
+        postgres1.ssh('FACTER_excludes=::dc_profile::puppet::puppet,::dc_profile::mon::icinga2 FACTER_role=postgresql_slave puppet agent --test', acceptable_exitcodes=[0, 2])
+
+if __name__ == '__main__':
+    main()
+
+# vi: ts=4 et:

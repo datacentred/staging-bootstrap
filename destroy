@@ -1,0 +1,7 @@
+#!/bin/bash
+
+for i in ns0 puppetca gateway0; do
+  virsh destroy $i.example.com
+  virsh undefine $i.example.com
+  rm -f $i.example.com.img
+done

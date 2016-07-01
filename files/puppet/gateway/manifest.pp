@@ -98,6 +98,36 @@ haproxy::balancermember { 'puppet':
   options           => 'check',
 }
 
+haproxy::listen { 'puppetdb':
+  collect_exported => false,
+  mode             => 'http',
+  bind             => {
+    ':8081' => [
+      'ssl',
+      'no-sslv3',
+      'ciphers ECDH+AESGCM:DH+AESGCM:ECDH+AES256:DH+AES256:ECDH+AES128:DH+AES:ECDH+3DES:DH+3DES:RSA+AESGCM:RSA+AES:RSA+3DES:!aNULL:!MD5:!DSS'
+      'crt /etc/ssl/private/puppet.crt'
+      'crl-file /var/lib/puppet/ssl/crl.pem'
+      'ca-file /var/lib/puppet/ssl/certs/ca.pem'
+      'verify required'
+    ],
+  }
+  options          => {
+  }
+}
+
+haproxy::balancermember { 'puppetdb':
+  listening_service => 'puppetdb',
+  ports             => '8081',
+  server_names      => [
+    'puppetdb0.example.com',
+  ],
+  ipaddresses       => [
+    '10.20.192.7',
+  ],
+  options           => 'ssl ca-file /var/lib/puppet/ssl/certs/ca.pem crt /etc/ssl/private/puppet.crt check check-ssl',
+}
+
 keepalived::vrrp::instance { 'VI_1':
   interface         => 'eth0',
   state             => 'SLAVE',

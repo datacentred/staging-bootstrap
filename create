@@ -50,6 +50,20 @@ PUPPET_CONF_CA = {
     },
 }
 
+PUPPET_CONF_CA_PUPPETDB = {
+    'main' : {
+        'logdir': '/var/log/puppet',
+        'vardir': '/var/lib/puppet',
+        'ssldir': '/var/lib/puppet/ssl',
+        'rundir': '/var/run/puppet',
+    },
+    'master': {
+        'environmentpath': '$confdir/environments',
+        'storeconfigs': 'true',
+        'storeconfigs_backend': 'puppetdb',
+    },
+}
+
 # Gateway configuration, specifies DNS Alternate Names for X.509 generation
 PUPPET_CONF_GATEWAY = {
     'main' : {
@@ -503,6 +517,27 @@ def main():
         postgres1.install_puppet()
         postgres1.configure_puppet(PUPPET_CONF)
         postgres1.ssh('FACTER_excludes=::dc_profile::puppet::puppet,::dc_profile::mon::icinga2 FACTER_role=postgresql_slave puppet agent --test', acceptable_exitcodes=[0, 2])
+
+    ###########################
+    # Host 6: Create puppetdb #
+    ###########################
+    puppetdb0 = Host('puppetdb0.example.com', subnet, address=u'10.20.192.7')
+    dns.default(puppetdb0)
+    if not puppetdb0.exists():
+        puppetdb0.create()
+        puppetdb0.install_puppet()
+        puppetdb0.configure_puppet(PUPPET_CONF)
+        puppetdb0.ssh('FACTER_excludes=::dc_profile::puppet::puppet,::dc_profile::mon::icinga2 FACTER_role=puppetdb puppet agent --test', acceptable_exitcodes=[0, 2])
+
+    ###################################
+    # Imbue puppet with store configs #
+    ###################################
+    dns.A('puppetdb.example.com', u'10.20.192.2')
+    puppetca.ssh('apt-get -y install puppetdb-terminus')
+    puppetca.scp('files/puppet/puppetca/routes.yaml', '/etc/puppet/routes.yaml')
+    puppetca.scp('files/puppet/puppetca/puppetdb.conf', '/etc/puppet/puppetdb.conf')
+    puppetca.configure_puppet(PUPPET_CONF_CA_PUPPETDB)
+    puppetca.ssh('service apache2 restart')
 
 if __name__ == '__main__':
     main()

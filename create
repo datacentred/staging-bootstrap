@@ -539,6 +539,17 @@ def main():
     puppetca.configure_puppet(PUPPET_CONF_CA_PUPPETDB)
     puppetca.ssh('service apache2 restart')
 
+    ##########################
+    # Host 7: Create foreman #
+    ##########################
+    foreman0 = Host('foreman0.example.com', subnet, address=u'10.20.192.8')
+    dns.default(foreman0)
+    if not foreman0.exists():
+        foreman0.create()
+        foreman0.install_puppet()
+        foreman0.configure_puppet(PUPPET_CONF)
+        foreman0.ssh('FACTER_excludes=::dc_profile::puppet::puppet FACTER_role=foreman puppet agent --test', acceptable_exitcodes=[0, 2])
+
 if __name__ == '__main__':
     main()
 

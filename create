@@ -315,8 +315,13 @@ class Host(object):
         detail('Started in {}s'.format(delta))
 
 
-    def ssh(self, command, acceptable_exitcodes=[0]):
+    def ssh(self, command, **kwargs):
         """SSH onto a host and execute a command"""
+
+        if 'acceptable_exitcodes' in kwargs:
+            acceptable_exitcodes = kwargs['acceptable_exitcodes']
+        else:
+            acceptable_exitcodes = [0]
 
         info('Executing on {}: {}'.format(self.name, command))
         client = paramiko.client.SSHClient()
@@ -380,6 +385,28 @@ class Host(object):
             self.ssh(r'puppet module install {}'.format(module))
 
 
+    def puppet_apply(self, manifest, **kwargs):
+        """Transfer and apply a manifest"""
+
+        target = '/tmp/manifest.pp'
+        self.scp(manifest, target)
+        command = ''
+        if 'facts' in kwargs:
+            command = ' '.join(('FACTER_' + x + '=' + kwargs['facts'][x] for x in  kwargs['facts'])) + ' '
+        command = command + 'puppet apply ' + target
+        self.ssh(command)
+
+
+    def puppet_agent(self, role, **kwargs):
+        """Run puppet against the master specifying role and excluded classes"""
+
+        command = 'FACTER_role=' + role + ' '
+        if 'excludes' in kwargs:
+            command = command + 'FACTER_excludes=' + ','.join(kwargs['excludes']) + ' '
+        command = command + 'puppet agent --test'
+        self.ssh(command, acceptable_exitcodes=[0, 2])
+
+
 class DNS(object):
     """Wrapper for DDNS functionality"""
 
@@ -393,14 +420,16 @@ class DNS(object):
     def A(self, fqdn, ip):
         """Add an A record"""
 
-        self.host.ssh('echo -e "server 127.0.0.1\nupdate add {} 604800 A {}\nsend" | nsupdate -k /etc/bind/rndc.key'.format(fqdn, ip))
+        if ip not in subprocess.check_output(['dig', '@' + self.host.address, '+short', fqdn, 'A']):
+            self.host.ssh('echo -e "server 127.0.0.1\nupdate add {} 604800 A {}\nsend" | nsupdate -k /etc/bind/rndc.key'.format(fqdn, ip))
 
 
     def PTR(self, fqdn, ip):
         """Add a PTR record"""
 
         arpa = '.'.join(reversed(ip.split('.'))) + '.in-addr.arpa'
-        self.host.ssh('echo -e "server 127.0.0.1\nupdate add {} 604800 PTR {}\nsend" | nsupdate -k /etc/bind/rndc.key'.format(arpa, fqdn))
+        if fqdn not in subprocess.check_output(['dig', '@' + self.host.address, '+short', arpa, 'PTR']):
+            self.host.ssh('echo -e "server 127.0.0.1\nupdate add {} 604800 PTR {}\nsend" | nsupdate -k /etc/bind/rndc.key'.format(arpa, fqdn))
 
 
     def default(self, host):
@@ -435,10 +464,8 @@ def main():
         ns0.configure_puppet(PUPPET_CONF)
         # Install prerequisite modules
         ns0.install_puppet_modules('theforeman-dns')
-        # Install the manifest, and default hiera
-        ns0.scp('files/puppet/dns_master/manifest.pp', '/tmp/manifest.pp')
         # Apply the manifest
-        ns0.ssh('puppet apply /tmp/manifest.pp')
+        ns0.puppet_apply('files/puppet/dns_master/manifest.pp')
 
     # Update the subnet so subsequent hosts point at the nameserver
     subnet.set_nameserver(ns0.address)
@@ -457,16 +484,17 @@ def main():
         puppetca.configure_puppet(PUPPET_CONF_CA)
         # Install prerequisite modules
         puppetca.install_puppet_modules('puppetlabs-apache')
-        # Install the manifest, and default hiera
-        puppetca.scp('files/puppet/puppetca/manifest.pp', '/tmp/manifest.pp')
+        # Install manifest prerequisites
         puppetca.scp('files/puppet/puppetca/common.yaml', '/var/lib/hiera/common.yaml')
-        # Install resources needed by the maifest
         puppetca.scp('files/puppet/puppetca/hiera.yaml', '/tmp/hiera.yaml')
         puppetca.scp('files/puppet/puppetca/public_key.pkcs7.pem', '/tmp/public_key.pkcs7.pem')
         puppetca.scp('files/puppet/puppetca/private_key.pkcs7.pem', '/tmp/private_key.pkcs7.pem')
         # Apply the manifest
-        puppetca.ssh('FACTER_deploy_user={} FACTER_deploy_pass={} puppet apply /tmp/manifest.pp'.\
-                     format(config.get('github', 'user')), format(config.get('github', 'pass')))
+        facts = {
+            'deploy_user': config.get('github', 'user'),
+            'deploy_pass': config.get('github', 'pass'),
+        }
+        puppetca.puppet_apply('files/puppet/puppetca/manifest.pp', facts=facts)
 
     ############################
     # Host 3: Create a gateway #
@@ -479,12 +507,10 @@ def main():
         gateway0.configure_puppet(PUPPET_CONF_GATEWAY)
         # Install prerequisite modules
         gateway0.install_puppet_modules(['puppetlabs-apt', 'puppetlabs-haproxy', 'arioch-keepalived'])
-        # Install the manifest
-        gateway0.scp('files/puppet/gateway/manifest.pp', '/tmp/manifest.pp')
         # Generate the certificates
         gateway0.ssh('puppet agent --test --server puppetca.example.com --tags non_existant')
         # Apply the manifest
-        gateway0.ssh('puppet apply /tmp/manifest.pp')
+        gateway0.puppet_apply('files/puppet/gateway/manifest.pp')
 
     #########################################
     # Swing puppet behind the load-balancer #
@@ -492,6 +518,19 @@ def main():
     dns.A('puppet.example.com', '10.20.192.2')
     puppetca.scp('files/puppet/puppetca/manifest-2.pp', '/tmp/manifest.pp')
     puppetca.ssh('puppet apply /tmp/manifest.pp')
+
+    default_excludes = [
+        # Root needs to log in to provision
+        '::dc_profile::auth::rootpw',
+        # Root needs to be able to ssh in to provision
+        '::dc_profile::net::ssh',
+        # Prevent puppet from running automatically until the ENC is up
+        # Losing the role fact loses configuration (e.g. sudoers) and installs
+        # these classes that we don't want installing yet
+        '::dc_profile::puppet::puppet',
+        # Icinga2 requires storeconfigs which we don't have yet
+        '::dc_profile::mon::icinga2',
+    ]
 
     ######################################
     # Host 4: Create the postgres master #
@@ -503,9 +542,7 @@ def main():
         postgres0.create()
         postgres0.install_puppet()
         postgres0.configure_puppet(PUPPET_CONF)
-        # Exclude puppet as it will run there after via cron, however without a role and erase configuration
-        # Exclude icinga2 as it requires store configs to be working
-        postgres0.ssh('FACTER_excludes=::dc_profile::puppet::puppet,::dc_profile::mon::icinga2 FACTER_role=postgresql_master puppet agent --test', acceptable_exitcodes=[0, 2])
+        postgres0.puppet_agent('postgresql_master', excludes=default_excludes)
 
     #####################################
     # Host 5: Create the postgres slave #
@@ -516,7 +553,7 @@ def main():
         postgres1.create()
         postgres1.install_puppet()
         postgres1.configure_puppet(PUPPET_CONF)
-        postgres1.ssh('FACTER_excludes=::dc_profile::puppet::puppet,::dc_profile::mon::icinga2 FACTER_role=postgresql_slave puppet agent --test', acceptable_exitcodes=[0, 2])
+        postgres1.puppet_agent('postgresql_slave', excludes=default_excludes)
 
     ###########################
     # Host 6: Create puppetdb #
@@ -527,7 +564,7 @@ def main():
         puppetdb0.create()
         puppetdb0.install_puppet()
         puppetdb0.configure_puppet(PUPPET_CONF)
-        puppetdb0.ssh('FACTER_excludes=::dc_profile::puppet::puppet,::dc_profile::mon::icinga2 FACTER_role=puppetdb puppet agent --test', acceptable_exitcodes=[0, 2])
+        puppetdb0.puppet_agent('puppetdb', excludes=default_excludes)
 
     ###################################
     # Imbue puppet with store configs #
@@ -548,7 +585,9 @@ def main():
         foreman0.create()
         foreman0.install_puppet()
         foreman0.configure_puppet(PUPPET_CONF)
-        foreman0.ssh('FACTER_excludes=::dc_profile::puppet::puppet FACTER_role=foreman puppet agent --test', acceptable_exitcodes=[0, 2])
+        foreman0.puppet_agent('foreman', excludes=default_excludes)
+        # Foreman generates a random password which locks everyone out, so get this back under control
+        foreman0.ssh('foreman-rake permissions:reset password=password')
 
 if __name__ == '__main__':
     main()

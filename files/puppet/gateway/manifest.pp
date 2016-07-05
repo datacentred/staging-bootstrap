@@ -105,15 +105,15 @@ haproxy::listen { 'puppetdb':
     ':8081' => [
       'ssl',
       'no-sslv3',
-      'ciphers ECDH+AESGCM:DH+AESGCM:ECDH+AES256:DH+AES256:ECDH+AES128:DH+AES:ECDH+3DES:DH+3DES:RSA+AESGCM:RSA+AES:RSA+3DES:!aNULL:!MD5:!DSS'
-      'crt /etc/ssl/private/puppet.crt'
-      'crl-file /var/lib/puppet/ssl/crl.pem'
-      'ca-file /var/lib/puppet/ssl/certs/ca.pem'
-      'verify required'
+      'ciphers ECDH+AESGCM:DH+AESGCM:ECDH+AES256:DH+AES256:ECDH+AES128:DH+AES:ECDH+3DES:DH+3DES:RSA+AESGCM:RSA+AES:RSA+3DES:!aNULL:!MD5:!DSS',
+      'crt /etc/ssl/private/puppet.crt',
+      'crl-file /var/lib/puppet/ssl/crl.pem',
+      'ca-file /var/lib/puppet/ssl/certs/ca.pem',
+      'verify required',
     ],
-  }
+  },
   options          => {
-  }
+  },
 }
 
 haproxy::balancermember { 'puppetdb':

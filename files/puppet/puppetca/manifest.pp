@@ -96,6 +96,14 @@ file { '/etc/puppet/keys':
   mode   => '0755',
 } ->
 
+file { '/etc/puppet/keys/public_key.pkcs7.pem':
+  ensure => file,
+  owner  => 'puppet',
+  group  => 'puppet',
+  mode   => '0400',
+  source => '/tmp/public_key.pkcs7.pem',
+} ->
+
 file { '/etc/puppet/keys/private_key.pkcs7.pem':
   ensure => file,
   owner  => 'puppet',

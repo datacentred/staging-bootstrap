@@ -1,6 +1,6 @@
 #!/bin/bash
 
-for i in ns0 puppetca gateway0; do
+for i in ns0 puppetca gateway0 postgres0 postgres1 puppetdb0 foreman0; do
   virsh destroy $i.example.com
   virsh undefine $i.example.com
   rm -f $i.example.com.img

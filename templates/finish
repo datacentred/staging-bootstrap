@@ -4,3 +4,7 @@
 # code stupidly uses hard coded UIDs and GIDs because we're obviously living in the
 # 1970s and program mainframes.  This will be fixed up when actual puppet code runs
 sed -i 's/^PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
+
+apt-get -y install software-properties-common
+apt-get -y install apt-transport-https
+apt-get -y install ifenslave vlan

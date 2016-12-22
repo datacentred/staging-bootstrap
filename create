@@ -29,36 +29,23 @@ SERVER_PORT = 8088
 
 # Default configuration
 PUPPET_CONF = {
-    'main' : {
-        'logdir': '/var/log/puppet',
-        'vardir': '/var/lib/puppet',
-        'ssldir': '/var/lib/puppet/ssl',
-        'rundir': '/var/run/puppet',
+    'agent': {
+        'server': 'puppet.example.com',
     },
 }
 
 # CA configuration
 PUPPET_CONF_CA = {
-    'main' : {
-        'logdir': '/var/log/puppet',
-        'vardir': '/var/lib/puppet',
-        'ssldir': '/var/lib/puppet/ssl',
-        'rundir': '/var/run/puppet',
-    },
-    'master': {
-        'environmentpath': '$confdir/environments',
+    'agent': {
+        'server': 'puppet.example.com',
     },
 }
 
 PUPPET_CONF_CA_PUPPETDB = {
-    'main' : {
-        'logdir': '/var/log/puppet',
-        'vardir': '/var/lib/puppet',
-        'ssldir': '/var/lib/puppet/ssl',
-        'rundir': '/var/run/puppet',
+    'agent': {
+        'server': 'puppet.example.com',
     },
     'master': {
-        'environmentpath': '$confdir/environments',
         'storeconfigs': 'true',
         'storeconfigs_backend': 'puppetdb',
     },
@@ -67,11 +54,10 @@ PUPPET_CONF_CA_PUPPETDB = {
 # Gateway configuration, specifies DNS Alternate Names for X.509 generation
 PUPPET_CONF_GATEWAY = {
     'main' : {
-        'logdir': '/var/log/puppet',
-        'vardir': '/var/lib/puppet',
-        'ssldir': '/var/lib/puppet/ssl',
-        'rundir': '/var/run/puppet',
-        'dns_alt_names': '*,*.example.com,*.staging.datacentred.services',
+        'dns_alt_names': '*.example.com,*.staging.datacentred.services',
+    },
+    'agent': {
+        'server': 'puppet.example.com',
     },
 }
 
@@ -263,7 +249,7 @@ class Host(object):
             '--ram', '{}'.format(self.ram),
             '--controller', 'type=scsi,model=virtio-scsi', # Needed for ceph provisioning
             '--disk', '{}.img,size={},bus=scsi'.format(self.name, self.disk),
-            '--location', 'http://gb.archive.ubuntu.com/ubuntu/dists/trusty/main/installer-amd64',
+            '--location', 'http://gb.archive.ubuntu.com/ubuntu/dists/xenial/main/installer-amd64',
             '--network', 'bridge=br0',
             '--extra-args', ' '.join(extra_args),
             '--noautoconsole', # !!!!!! Causes operation to be non-blocking !!!!!!
@@ -354,15 +340,15 @@ class Host(object):
     def install_puppet(self):
         """Install puppet on the host"""
 
-        deb = 'puppetlabs-release-trusty.deb'
+        deb = 'puppetlabs-release-pc1-xenial.deb'
         self.ssh(r'wget -O /tmp/{0} https://apt.puppet.com/{0}'.format(deb))
         self.ssh(r'dpkg -i --force-all /tmp/{0}'.format(deb))
         self.ssh(r'apt-get update')
-        # NOTE: install puppet (not puppet-common) as this is what Foreman does
-        # and is required by the manifest
-        # NOTE: alter foreman to install puppet-common and remove the hack!!
         self.ssh(r'echo START=no > /etc/default/puppet')
-        self.ssh(r'apt-get -y -o DPkg::Options::=--force-confold install puppet')
+        self.ssh(r'apt-get -y -o DPkg::Options::=--force-confold install puppet-agent')
+        # Temporary hack for Icinga 2 (prevents restarts and box death!)
+        self.ssh(r'mkdir -p /var/lib/puppet')
+        self.ssh(r'ln -s /etc/puppetlabs/puppet/ssl /var/lib/puppet')
 
 
     def configure_puppet(self, config):
@@ -373,7 +359,7 @@ class Host(object):
             text += "[{}]\n".format(section)
             for option in config[section]:
                 text += "{}={}\n".format(option, config[section][option])
-        self.ssh('echo \'{}\' > /etc/puppet/puppet.conf'.format(text))
+        self.ssh('echo \'{}\' > /etc/puppetlabs/puppet/puppet.conf'.format(text))
 
 
     def install_puppet_modules(self, modules):
@@ -382,7 +368,7 @@ class Host(object):
         if isinstance(modules, str):
             modules = modules.split()
         for module in modules:
-            self.ssh(r'puppet module install {}'.format(module))
+            self.ssh(r'/opt/puppetlabs/bin/puppet module install {}'.format(module))
 
 
     def puppet_apply(self, manifest, **kwargs):
@@ -393,7 +379,7 @@ class Host(object):
         command = ''
         if 'facts' in kwargs:
             command = ' '.join(('FACTER_' + x + '=' + kwargs['facts'][x] for x in  kwargs['facts'])) + ' '
-        command = command + 'puppet apply ' + target
+        command = command + '/opt/puppetlabs/bin/puppet apply ' + target
         self.ssh(command)
 
 
@@ -403,7 +389,7 @@ class Host(object):
         command = 'FACTER_role=' + role + ' '
         if 'excludes' in kwargs:
             command = command + 'FACTER_excludes=' + ','.join(kwargs['excludes']) + ' '
-        command = command + 'puppet agent --test'
+        command = command + '/opt/puppetlabs/bin/puppet agent --test'
         self.ssh(command, acceptable_exitcodes=[0, 2])
 
 
@@ -476,16 +462,15 @@ def main():
     ################################
     # Host 2: Create the puppet CA #
     ################################
-    puppetca = Host('puppetca.example.com', subnet, address=u'10.20.192.3')
+    puppetca = Host('puppetca.example.com', subnet, address=u'10.20.192.3', ram=4096)
     dns.default(puppetca)
     if not puppetca.exists():
         puppetca.create()
         puppetca.install_puppet()
         puppetca.configure_puppet(PUPPET_CONF_CA)
         # Install prerequisite modules
-        puppetca.install_puppet_modules('puppetlabs-apache')
+        puppetca.install_puppet_modules('puppetlabs-stdlib')
         # Install manifest prerequisites
-        puppetca.scp('files/puppet/puppetca/common.yaml', '/var/lib/hiera/common.yaml')
         puppetca.scp('files/puppet/puppetca/hiera.yaml', '/tmp/hiera.yaml')
         puppetca.scp('files/puppet/puppetca/public_key.pkcs7.pem', '/tmp/public_key.pkcs7.pem')
         puppetca.scp('files/puppet/puppetca/private_key.pkcs7.pem', '/tmp/private_key.pkcs7.pem')
@@ -508,7 +493,9 @@ def main():
         # Install prerequisite modules
         gateway0.install_puppet_modules(['puppetlabs-apt', 'puppetlabs-haproxy', 'arioch-keepalived'])
         # Generate the certificates
-        gateway0.ssh('puppet agent --test --server puppetca.example.com --tags non_existant')
+        gateway0.ssh('/opt/puppetlabs/bin/puppet agent --test --server puppetca.example.com --tags non_existant', acceptable_exitcodes=[1])
+        puppetca.ssh('/opt/puppetlabs/bin/puppet cert --allow-dns-alt-names sign gateway0.example.com')
+        gateway0.ssh('/opt/puppetlabs/bin/puppet agent --test --server puppetca.example.com --tags non_existant')
         # Apply the manifest
         gateway0.puppet_apply('files/puppet/gateway/manifest.pp')
 
@@ -516,18 +503,16 @@ def main():
     # Swing puppet behind the load-balancer #
     #########################################
     dns.A('puppet.example.com', '10.20.192.2')
-    puppetca.scp('files/puppet/puppetca/manifest-2.pp', '/tmp/manifest.pp')
-    puppetca.ssh('puppet apply /tmp/manifest.pp')
+    puppetca.scp('files/puppet/puppetca/auth.conf', '/tmp/auth.conf')
+    puppetca.scp('files/puppet/puppetca/puppetserver.conf', '/tmp/puppetserver.conf')
+    puppetca.scp('files/puppet/puppetca/webserver.conf', '/tmp/webserver.conf')
+    puppetca.puppet_apply('files/puppet/puppetca/manifest-2.pp')
 
     default_excludes = [
         # Root needs to log in to provision
         '::dc_profile::auth::rootpw',
         # Root needs to be able to ssh in to provision
         '::dc_profile::net::ssh',
-        # Prevent puppet from running automatically until the ENC is up
-        # Losing the role fact loses configuration (e.g. sudoers) and installs
-        # these classes that we don't want installing yet
-        '::dc_profile::puppet::puppet',
         # Icinga2 requires storeconfigs which we don't have yet
         '::dc_profile::mon::icinga2',
     ]
@@ -570,11 +555,11 @@ def main():
     # Imbue puppet with store configs #
     ###################################
     dns.A('puppetdb.example.com', u'10.20.192.2')
-    puppetca.ssh('apt-get -y install puppetdb-terminus')
-    puppetca.scp('files/puppet/puppetca/routes.yaml', '/etc/puppet/routes.yaml')
-    puppetca.scp('files/puppet/puppetca/puppetdb.conf', '/etc/puppet/puppetdb.conf')
+    puppetca.ssh('apt-get -y install puppetdb-termini')
+    puppetca.scp('files/puppet/puppetca/routes.yaml', '/etc/puppetlabs/puppet/routes.yaml')
+    puppetca.scp('files/puppet/puppetca/puppetdb.conf', '/etc/puppetlabs/puppet/puppetdb.conf')
     puppetca.configure_puppet(PUPPET_CONF_CA_PUPPETDB)
-    puppetca.ssh('service apache2 restart')
+    puppetca.ssh('systemctl restart puppetserver')
 
     ##########################
     # Host 7: Create foreman #

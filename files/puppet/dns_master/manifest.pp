@@ -3,6 +3,12 @@ Exec {
   path => '/bin:/usr/bin:/sbin:/usr/sbin',
 }
 
+$packages = [
+  'dnsutils', # nsupdate
+]
+
+ensure_packages($packages)
+
 # Install foreman DNS
 class { 'dns':
   forwarders      => [
@@ -18,10 +24,10 @@ class { 'dns':
 exec { 'sed -i "s/dns-nameservers.*/dns-nameservers 10.20.192.250/" /etc/network/interfaces':
 } ->
 
-exec { 'ifdown eth0':
+exec { 'ifdown ens3':
 } ->
 
-exec { 'ifup eth0':
+exec { 'ifup ens3':
 }
 
 dns::zone { $::domain:

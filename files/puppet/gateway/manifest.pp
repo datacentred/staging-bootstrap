@@ -11,13 +11,13 @@ concat { '/etc/ssl/private/puppet.crt':
 
 concat::fragment { 'haproxy puppet key':
   target => '/etc/ssl/private/puppet.crt',
-  source => "/var/lib/puppet/ssl/private_keys/${::fqdn}.pem",
+  source => "/etc/puppetlabs/puppet/ssl/private_keys/${::fqdn}.pem",
   order  => '1',
 }
 
 concat::fragment { 'haproxy puppet cert':
   target => '/etc/ssl/private/puppet.crt',
-  source => "/var/lib/puppet/ssl/certs/${::fqdn}.pem",
+  source => "/etc/puppetlabs/puppet/ssl/certs/${::fqdn}.pem",
   order  => '2',
 } 
 
@@ -41,7 +41,7 @@ haproxy::frontend { 'puppet':
       'no-sslv3',
       'ciphers ECDH+AESGCM:DH+AESGCM:ECDH+AES256:DH+AES256:ECDH+AES128:DH+AES:ECDH+3DES:DH+3DES:RSA+AESGCM:RSA+AES:RSA+3DES:!aNULL:!MD5:!DSS',
       'crt /etc/ssl/private/puppet.crt',
-      'ca-file /var/lib/puppet/ssl/certs/ca.pem',
+      'ca-file /etc/puppetlabs/puppet/ssl/certs/ca.pem',
       'verify optional',
     ],
   },
@@ -107,8 +107,8 @@ haproxy::listen { 'puppetdb':
       'no-sslv3',
       'ciphers ECDH+AESGCM:DH+AESGCM:ECDH+AES256:DH+AES256:ECDH+AES128:DH+AES:ECDH+3DES:DH+3DES:RSA+AESGCM:RSA+AES:RSA+3DES:!aNULL:!MD5:!DSS',
       'crt /etc/ssl/private/puppet.crt',
-      'crl-file /var/lib/puppet/ssl/crl.pem',
-      'ca-file /var/lib/puppet/ssl/certs/ca.pem',
+      'crl-file /etc/puppetlabs/puppet/ssl/crl.pem',
+      'ca-file /etc/puppetlabs/puppet/ssl/certs/ca.pem',
       'verify required',
     ],
   },
@@ -125,11 +125,11 @@ haproxy::balancermember { 'puppetdb':
   ipaddresses       => [
     '10.20.192.7',
   ],
-  options           => 'ssl ca-file /var/lib/puppet/ssl/certs/ca.pem crt /etc/ssl/private/puppet.crt check check-ssl',
+  options           => 'ssl ca-file /etc/puppetlabs/puppet/ssl/certs/ca.pem crt /etc/ssl/private/puppet.crt check check-ssl',
 }
 
 keepalived::vrrp::instance { 'VI_1':
-  interface         => 'eth0',
+  interface         => 'ens3',
   state             => 'SLAVE',
   virtual_router_id => '1',
   priority          => '100',

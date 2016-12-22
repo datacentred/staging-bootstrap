@@ -1,14 +1,13 @@
 :backends:
   - eyaml
   - yaml
-  - puppetdb
 :yaml:
-  :datadir: "/etc/puppet/environments/%{environment}/hieradata"
+  :datadir: "/etc/puppetlabs/code/environments/%{environment}/hieradata"
 :eyaml:
   :extension: yaml
-  :datadir: "/etc/puppet/environments/%{environment}/hieradata"
-  :pkcs7_private_key: /etc/puppet/keys/private_key.pkcs7.pem
-  :pkcs7_public_key: /etc/puppet/keys/public_key.pkcs7.pem
+  :datadir: "/etc/puppetlabs/code/environments/%{environment}/hieradata"
+  :pkcs7_private_key: /etc/puppetlabs/puppet/keys/private_key.pkcs7.pem
+  :pkcs7_public_key: /etc/puppetlabs/puppet/keys/public_key.pkcs7.pem
 :merge_behavior: deeper
 :hierarchy:
   - "nodes/%{hostname}"

@@ -27,9 +27,9 @@ d-i mirror/country string manual
 d-i mirror/http/hostname string mirror.bytemark.co.uk
 d-i mirror/http/directory string /ubuntu
 d-i mirror/http/proxy string
-d-i mirror/codename string trusty
-d-i mirror/suite string trusty
-d-i mirror/udeb/suite string trusty
+d-i mirror/codename string xenial
+d-i mirror/suite string xenial
+d-i mirror/udeb/suite string xenial
 
 # Time settings
 d-i clock-setup/utc boolean true

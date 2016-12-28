@@ -1,7 +1,48 @@
-#!/bin/bash
+#!/usr/bin/env python
 
-for i in ns0 puppetca gateway0 postgres0 postgres1 puppetdb0 foreman0; do
-  virsh destroy $i.example.com
-  virsh undefine $i.example.com
-  rm -f $i.example.com.img
-done
+import os
+import subprocess
+import sys
+
+
+def get_guests():
+    """Get all guests on the system"""
+
+    # Get only lines containing guest declarations
+    out = subprocess.check_output(['virsh', 'list', '--all']).split("\n")[2:-2]
+
+    # Extract the guest names
+    return [x.split()[1] for x in out]
+
+
+def get_networks():
+    """Get all networks on the system"""
+
+    # Get only the lines containing network declarations
+    out = subprocess.check_output(['virsh', 'net-list']).split("\n")[3:-2]
+
+    # Extract the network names
+    return [x.split()[0] for x in out]
+
+
+def main(whitelist):
+    """Destroy any resources accociated with guests"""
+
+    guests = get_guests()
+    for guest in guests:
+        if len(whitelist) == 0 or guest in whitelist:
+            subprocess.check_call(['virsh', 'destroy', guest])
+            subprocess.check_call(['virsh', 'undefine', guest])
+            os.unlink('{}.img'.format(guest))
+
+    networks = get_networks()
+    for network in networks:
+        if len(whitelist) == 0 or any([network.startswith(x.replace('.', '_')) for x in whitelist]):
+            subprocess.check_call(['virsh', 'net-destroy', network])
+
+
+if __name__ == '__main__':
+    main(sys.argv[1:])
+
+
+# vi: ts=4 et:

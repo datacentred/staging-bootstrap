@@ -1,6 +1,15 @@
 #!/bin/bash
 
-sudo brctl addbr br0
-sudo ip link set up br0
-sudo ip addr add 10.20.192.1/24 dev br0
+# Create the external bridge
+sudo ovs-vsctl add-br br0
+sudo ip link set br0 up
+
+# Add a virtual interface that listens on VLAN 292
+sudo vconfig add br0 292
+sudo ip link set br0.292 up
+
+# Assign a layer 3 address to act as a router and listen for preseed requests
+sudo ip address add 10.20.192.1/24 dev br0.292
+
+# Finally add a MASQUERADE rule that is applied to all packets leaving VLAN 292
 sudo iptables -t nat -A POSTROUTING -s 10.20.192.0/24 ! -d 10.20.192.0/24 -j MASQUERADE

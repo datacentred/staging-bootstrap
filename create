@@ -17,6 +17,7 @@ import BaseHTTPServer
 import crypt
 import ipaddress
 import paramiko
+import xml.etree.ElementTree as ET
 
 # Disable long line warnings
 # pylint: disable=C0301
@@ -133,12 +134,13 @@ class WebServer(object):
 class Subnet(object):
     """Container for a sub network"""
 
-    def __init__(self, subnet, gateway, nameserver):
+    def __init__(self, subnet, gateway, nameserver, vlan):
         """Initialise a subnet"""
 
         self.subnet = ipaddress.IPv4Network(subnet)
         self.gateway = ipaddress.IPv4Address(gateway)
         self.nameserver = ipaddress.IPv4Address(nameserver)
+        self.vlan = vlan
         self.allocations = [self.gateway]
 
 
@@ -164,6 +166,12 @@ class Subnet(object):
         """Get the nameserver"""
 
         return self.nameserver.exploded
+
+
+    def get_vlan(self):
+        """Get the VLAN for the subnet"""
+
+        return self.vlan
 
 
     def allocate_address(self, fixed=False):
@@ -226,6 +234,26 @@ class Host(object):
         detail('Gateway {}'.format(self.subnet.get_gateway()))
         detail('DNS     {}'.format(self.subnet.get_nameserver()))
 
+        # virt-install only accepts a bridge or network on the command line
+        # so tagged VLANs need to be defined before hand
+        info('Defining network ...')
+        network_name = '{}-vlan-{}'.format(self.name.replace('.', '_'), self.subnet.get_vlan())
+        network = ET.Element('network')
+        name = ET.SubElement(network, 'name')
+        name.text = network_name
+        forward = ET.SubElement(network, 'forward')
+        forward.set('mode', 'bridge')
+        bridge = ET.SubElement(network, 'bridge')
+        bridge.set('name', 'br0')
+        virtualport = ET.SubElement(network, 'virtualport')
+        virtualport.set('type', 'openvswitch')
+        vlan = ET.SubElement(network, 'vlan')
+        tag = ET.SubElement(vlan, 'tag')
+        tag.set('id', self.subnet.get_vlan())
+        with open('/tmp/network.xml', 'w') as net_xml:
+            net_xml.write(ET.tostring(network))
+        subprocess.check_call(['virsh', 'net-create', '/tmp/network.xml'])
+
         extra_args = [
             'auto=true',
             'priority=critical',
@@ -250,7 +278,7 @@ class Host(object):
             '--controller', 'type=scsi,model=virtio-scsi', # Needed for ceph provisioning
             '--disk', '{}.img,size={},bus=scsi'.format(self.name, self.disk),
             '--location', 'http://gb.archive.ubuntu.com/ubuntu/dists/xenial/main/installer-amd64',
-            '--network', 'bridge=br0',
+            '--network', 'network={}'.format(network_name),
             '--extra-args', ' '.join(extra_args),
             '--noautoconsole', # !!!!!! Causes operation to be non-blocking !!!!!!
             '--serial', 'file,path=/tmp/{}.log'.format(self.name),
@@ -438,7 +466,7 @@ def main():
     WebServer.start(u'10.20.192.1', SERVER_PORT)
 
     # Create the platform-services network, initially pointing at google for DNS
-    subnet = Subnet(u'10.20.192.0/24', u'10.20.192.1', u'8.8.8.8')
+    subnet = Subnet(u'10.20.192.0/24', u'10.20.192.1', u'8.8.8.8', '292')
 
     #########################################
     # Host 1: Create the primary nameserver #

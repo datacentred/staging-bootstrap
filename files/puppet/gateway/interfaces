@@ -1,0 +1,11 @@
+
+auto ens4
+iface ens4 inet static
+  address 185.43.217.139
+  netmask 255.255.255.248
+  network 185.43.217.136
+  broadcast 185.43.217.143
+  post-up ip route replace default via 185.43.217.137
+  post-up ip route add 10.0.0.0/8 via 10.25.192.1
+  pre-down ip route del 10.0.0.0/8 via 10.25.192.1
+  pre-down ip route replace default via 10.25.192.1

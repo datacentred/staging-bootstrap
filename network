@@ -4,12 +4,16 @@
 sudo ovs-vsctl add-br br0
 sudo ip link set br0 up
 
-# Add a virtual interface that listens on VLAN 292
+# Add a virtual interface that listens on VLAN 292 & 516
 sudo vconfig add br0 292
 sudo ip link set br0.292 up
+sudo vconfig add br0 516
+sudo ip link set br0.516 up
 
-# Assign a layer 3 address to act as a router and listen for preseed requests
-sudo ip address add 10.20.192.1/24 dev br0.292
+# Assign a layer 3 addresses to act as routers and listen for preseed requests
+sudo ip address add 10.25.192.1/24 dev br0.292
+sudo ip address add 185.43.217.137/29 dev br0.516
 
 # Finally add a MASQUERADE rule that is applied to all packets leaving VLAN 292
-sudo iptables -t nat -A POSTROUTING -s 10.20.192.0/24 ! -d 10.20.192.0/24 -j MASQUERADE
+sudo iptables -t nat -A POSTROUTING -s 10.25.192.0/24 ! -d 10.25.192.0/24 -j MASQUERADE
+sudo iptables -t nat -A POSTROUTING -s 185.43.217.136/29 ! -d 185.43.217.136/29 -j MASQUERADE

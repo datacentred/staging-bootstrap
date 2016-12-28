@@ -74,7 +74,7 @@ haproxy::balancermember { 'puppetca':
     'puppetca.example.com',
   ],
   ipaddresses       => [
-    '10.20.192.3',
+    '10.25.192.3',
   ],
   options           => 'check',
 }
@@ -93,7 +93,7 @@ haproxy::balancermember { 'puppet':
     'puppetca.example.com',
   ],
   ipaddresses       => [
-    '10.20.192.3',
+    '10.25.192.3',
   ],
   options           => 'check',
 }
@@ -123,7 +123,7 @@ haproxy::balancermember { 'puppetdb':
     'puppetdb0.example.com',
   ],
   ipaddresses       => [
-    '10.20.192.7',
+    '10.25.192.9',
   ],
   options           => 'ssl ca-file /etc/puppetlabs/puppet/ssl/certs/ca.pem crt /etc/ssl/private/puppet.crt check check-ssl',
 }
@@ -133,5 +133,13 @@ keepalived::vrrp::instance { 'VI_1':
   state             => 'SLAVE',
   virtual_router_id => '1',
   priority          => '100',
-  virtual_ipaddress => '10.20.192.2/24',
+  virtual_ipaddress => '10.25.192.2/24',
+}
+
+keepalived::vrrp::instance { 'VI_2':
+  interface         => 'ens4',
+  state             => 'SLAVE',
+  virtual_router_id => '2',
+  priority          => '100',
+  virtual_ipaddress => '185.43.217.138/29',
 }

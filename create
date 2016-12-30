@@ -35,14 +35,7 @@ PUPPET_CONF = {
     },
 }
 
-# CA configuration
-PUPPET_CONF_CA = {
-    'agent': {
-        'server': 'puppet.example.com',
-    },
-}
-
-PUPPET_CONF_CA_PUPPETDB = {
+PUPPET_CONF_SERVER_WITH_PUPPETDB = {
     'agent': {
         'server': 'puppet.example.com',
     },
@@ -408,7 +401,7 @@ class Host(object):
         for section in config:
             text += "[{}]\n".format(section)
             for option in config[section]:
-                text += "{}={}\n".format(option, config[section][option])
+                text += "{} = {}\n".format(option, config[section][option])
         self.ssh('echo \'{}\' > /etc/puppetlabs/puppet/puppet.conf'.format(text))
 
 
@@ -428,7 +421,7 @@ class Host(object):
         self.scp(manifest, target)
         command = ''
         if 'facts' in kwargs:
-            command = ' '.join(('FACTER_' + x + '=' + kwargs['facts'][x] for x in  kwargs['facts'])) + ' '
+            command = ' '.join(('FACTER_' + x + '=' + kwargs['facts'][x] for x in kwargs['facts'])) + ' '
         command = command + '/opt/puppetlabs/bin/puppet apply ' + target
         self.ssh(command)
 
@@ -437,10 +430,17 @@ class Host(object):
         """Run puppet against the master specifying role and excluded classes"""
 
         command = 'FACTER_role=' + role + ' '
+        if 'facts' in kwargs:
+            command = command + ' '.join(('FACTER_' + x + '=' + kwargs['facts'][x] for x in kwargs['facts'])) + ' '
         if 'excludes' in kwargs:
             command = command + 'FACTER_excludes=' + ','.join(kwargs['excludes']) + ' '
         command = command + '/opt/puppetlabs/bin/puppet agent --test'
         self.ssh(command, acceptable_exitcodes=[0, 2])
+
+    def puppet_disable(self):
+        """Disable automatic puppet runs"""
+
+        self.ssh('/opt/puppetlabs/bin/puppet agent --disable')
 
 
 class DNS(object):
@@ -511,9 +511,10 @@ def main():
     # 185.43.217.140 - Gateway 1
     extsubnet = Subnet(u'185.43.217.136/29', u'185.43.216.137', u'8.8.8.8', '516')
 
-    #########################################
-    # Host 1: Create the primary nameserver #
-    #########################################
+    # Create the primary nameserver
+    #
+    # Establishes domain authority (e.g. ::domain and ::fqdn work)
+    # Allows creation of DNS A and PTR records for hosts
     ns0 = Host('ns0.example.com', [(subnet, u'10.25.192.250')])
     if not ns0.exists():
         ns0.create()
@@ -530,15 +531,17 @@ def main():
     # Create the DNS helper
     dns = DNS(ns0)
 
-    ################################
-    # Host 2: Create the puppet CA #
-    ################################
+    # Create the puppet CA
+    #
+    # Allows creation of SSL certificates, in particular the load-balancer so
+    # that we can start refering to puppet.staging.datacentred.services generically
+    # on all nodes
     puppetca = Host('puppetca.example.com', [(subnet, u'10.25.192.3')], ram=4096)
     dns.default(puppetca)
     if not puppetca.exists():
         puppetca.create()
         puppetca.install_puppet()
-        puppetca.configure_puppet(PUPPET_CONF_CA)
+        puppetca.configure_puppet(PUPPET_CONF)
         # Install prerequisite modules
         puppetca.install_puppet_modules('puppetlabs-stdlib')
         # Install manifest prerequisites
@@ -552,9 +555,11 @@ def main():
         }
         puppetca.puppet_apply('files/puppet/puppetca/manifest.pp', facts=facts)
 
-    ############################
-    # Host 3: Create a gateway #
-    ############################
+    # Create a gateway
+    #
+    # All services from both example.com and cloud.example.com are accessed via this
+    # load-balancer.  Once up we can begin using the Puppet CA server to provision
+    # with production code
     gateway0 = Host('gateway0.example.com', [(subnet, u'10.25.192.5'), (extsubnet, u'185.43.217.139')])
     dns.default(gateway0)
     if not gateway0.exists():
@@ -574,80 +579,130 @@ def main():
         # Apply the manifest
         gateway0.puppet_apply('files/puppet/gateway/manifest.pp')
 
-    #########################################
-    # Swing puppet behind the load-balancer #
-    #########################################
+    # Swing puppet behind the load-balancer
     dns.A('puppet.example.com', '10.25.192.2')
     puppetca.scp('files/puppet/puppetca/auth.conf', '/tmp/auth.conf')
     puppetca.scp('files/puppet/puppetca/puppetserver.conf', '/tmp/puppetserver.conf')
     puppetca.scp('files/puppet/puppetca/webserver.conf', '/tmp/webserver.conf')
     puppetca.puppet_apply('files/puppet/puppetca/manifest-2.pp')
 
+    default_facts = {
+        # This causes SSH to continue allowing root logins
+        'staging_bootstrap': 'true',
+    }
+
     default_excludes = [
-        # Root needs to log in to provision
-        '::dc_profile::auth::rootpw',
-        # Root needs to be able to ssh in to provision
-        '::dc_profile::net::ssh',
         # Icinga2 requires storeconfigs which we don't have yet
         '::dc_profile::mon::icinga2',
     ]
 
-    ######################################
-    # Host 4: Create the postgres master #
-    ######################################
-    # NOTE: Need at least 4GB RAM for PGSQL to provision without modification
+    # Create the postgres master
+    #
+    # Backend database used by puppetdb and foreman
+    #
+    # NOTE: Needs at least 4GB RAM for PGSQL to provision without modification
     postgres0 = Host('postgres0.example.com', [(subnet, u'10.25.192.7')], ram=8192)
     dns.default(postgres0)
     if not postgres0.exists():
         postgres0.create()
         postgres0.install_puppet()
         postgres0.configure_puppet(PUPPET_CONF)
-        postgres0.puppet_agent('postgresql_master', excludes=default_excludes)
+        postgres0.puppet_agent('postgresql_master', facts=default_facts, excludes=default_excludes)
+        # Prevent puppet runs until foreman is initialised with role data
+        postgres0.puppet_disable()
 
-    #####################################
-    # Host 5: Create the postgres slave #
-    #####################################
+    # Create the postgres slave
+    #
+    # Functionally not required yet as it's a hot standby, but it's probably
+    # easier to have the databases synchronized from the outset
     postgres1 = Host('postgres1.example.com', [(subnet, u'10.25.192.8')], ram=8192)
     dns.default(postgres1)
     if not postgres1.exists():
         postgres1.create()
         postgres1.install_puppet()
         postgres1.configure_puppet(PUPPET_CONF)
-        postgres1.puppet_agent('postgresql_slave', excludes=default_excludes)
+        postgres1.puppet_agent('postgresql_slave', facts=default_facts, excludes=default_excludes)
+        # Prevent puppet runs until foreman is initialised with role data
+        postgres1.puppet_disable()
 
-    ###########################
-    # Host 6: Create puppetdb #
-    ###########################
+    # Create puppetdb
+    #
+    # Allows code reliant on storeconfigs to work, for example service discovery
+    # for monitoring will now work
     puppetdb0 = Host('puppetdb0.example.com', [(subnet, u'10.25.192.9')])
     dns.default(puppetdb0)
     if not puppetdb0.exists():
         puppetdb0.create()
         puppetdb0.install_puppet()
         puppetdb0.configure_puppet(PUPPET_CONF)
-        puppetdb0.puppet_agent('puppetdb', excludes=default_excludes)
+        puppetdb0.puppet_agent('puppetdb', facts=default_facts, excludes=default_excludes)
+        # Prevent puppet runs until foreman is initialised with role data
+        puppetdb0.puppet_disable()
 
-    ###################################
-    # Imbue puppet with store configs #
-    ###################################
-    dns.A('puppetdb.example.com', u'10.25.192.2')
-    puppetca.ssh('apt-get -y install puppetdb-termini')
-    puppetca.scp('files/puppet/puppetca/routes.yaml', '/etc/puppetlabs/puppet/routes.yaml')
-    puppetca.scp('files/puppet/puppetca/puppetdb.conf', '/etc/puppetlabs/puppet/puppetdb.conf')
-    puppetca.configure_puppet(PUPPET_CONF_CA_PUPPETDB)
-    puppetca.ssh('systemctl restart puppetserver')
+ #   # Imbue puppet with store configs
+ #   dns.A('puppetdb.example.com', u'10.25.192.2')
+ #   puppetca.ssh('apt-get -y install puppetdb-termini')
+ #   puppetca.scp('files/puppet/puppetca/routes.yaml', '/etc/puppetlabs/puppet/routes.yaml')
+ #   puppetca.scp('files/puppet/puppetca/puppetdb.conf', '/etc/puppetlabs/puppet/puppetdb.conf')
+ #   puppetca.configure_puppet(PUPPET_CONF_SERVER_WITH_PUPPETDB)
+ #   puppetca.ssh('systemctl restart puppetserver')
 
-    ##########################
-    # Host 7: Create foreman #
-    ##########################
+    # Create foreman
     foreman0 = Host('foreman0.example.com', [(subnet, u'10.25.192.10')])
     dns.default(foreman0)
     if not foreman0.exists():
         foreman0.create()
         foreman0.install_puppet()
         foreman0.configure_puppet(PUPPET_CONF)
-        foreman0.puppet_agent('foreman', excludes=default_excludes)
+        foreman0.puppet_agent('foreman', facts=default_facts, excludes=default_excludes)
+        # Prevent puppet runs until foreman is initialised with role data
+        foreman0.puppet_disable()
         # Foreman generates a random password which locks everyone out, so get this back under control
         foreman0.ssh('foreman-rake permissions:reset password=password')
+
+    # Create the secondary nameserver
+    ns1 = Host('ns1.example.com', [(subnet, u'10.25.192.251')])
+    dns.default(ns1)
+    if not ns1.exists():
+        ns1.create()
+        ns1.install_puppet()
+        ns1.configure_puppet(PUPPET_CONF)
+        ns1.puppet_agent('dns_slave', facts=default_facts, excludes=default_excludes)
+        # Prevent puppet runs until foreman is initialised with role data
+        ns1.puppet_disable()
+
+    # Bootstrap the primary nameserver fully
+    ns0.puppet_agent('dns_master', facts=default_facts, excludes=default_excludes)
+    ns0.puppet_disable()
+
+    # Bootstrap the gateway fully
+    #
+    # This will make puppetdb available via the load balancer when the puppet
+    # masters are fully provisioned
+    gateway0.puppet_agent('gateway', facts=default_facts, excludes=default_excludes)
+    # Prevent puppet runs until foreman is initialised with role data
+    gateway0.puppet_disable()
+
+    # Create a puppet master
+    #
+    # This is required for the synchronization agents on the master to work
+    # e.g. lsyncd will not work unless the target is defined.  This will also
+    # enable storeconfigs and foreman reports
+    puppet0 = Host('puppet0.example.com', [(subnet, u'10.25.192.4')])
+    dns.default(puppet0)
+    if not puppet0.exists():
+        puppet0.create()
+        puppet0.install_puppet()
+        puppet0.configure_puppet(PUPPET_CONF)
+        puppet0.puppet_agent('puppet_master', facts=default_facts, excludes=default_excludes)
+        # Prevent puppet runs until foreman is initialised with role data
+        puppet0.puppet_disable()
+
+    # Bootstrap the puppet ca fully
+    puppetca.puppet_agent('puppet_ca', facts=default_facts, excludes=default_excludes)
+    # Prevent puppet runs until foreman is initialised with role data
+    puppetca.puppet_disable()
+
 
 if __name__ == '__main__':
     main()

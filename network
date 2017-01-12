@@ -5,6 +5,7 @@ sudo ovs-vsctl add-br br0
 sudo ip link set br0 up
 
 # Add a virtual interface that listens on VLAN 292 & 516
+sudo modprobe 8021q
 sudo vconfig add br0 292
 sudo ip link set br0.292 up
 sudo vconfig add br0 516

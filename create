@@ -5,28 +5,18 @@ Core Network Bootstrapper
 
 # Standard imports
 import ConfigParser
-import string
-import struct
+import socket
 import subprocess
 import sys
-import threading
 import time
-import xml.etree.ElementTree as ET
 
 # 3rd party imports
-import BaseHTTPServer
+import bootstrap
 import crypt
-import ipaddress
 import paramiko
 
 # Disable long line warnings
 # pylint: disable=C0301
-
-# Root password set in the pressed and used to provision
-ROOT_PASSWORD = 'password'
-
-# Port the HTTP preseed server will listen on
-SERVER_PORT = 8088
 
 # Default configuration
 PUPPET_CONF = {
@@ -55,142 +45,18 @@ PUPPET_CONF_GATEWAY = {
     },
 }
 
-def info(message):
-    """Echos a message to stdout with infomational priority"""
-
-    sys.stdout.write("[1;32m>>> {}[0m".format(message))
-    if message[-1] != "\n":
-        sys.stdout.write("\n")
+# Where to install our boxen from
+INSTALLER_LOCATION = 'http://gb.archive.ubuntu.com/ubuntu/dists/xenial/main/installer-amd64'
 
 
-def detail(message):
-    """Echos a message to stdout with detail priority"""
-
-    sys.stdout.write("  [1m>>> {}[0m".format(message))
-    if message[-1] != "\n":
-        sys.stdout.write("\n")
-
-
-class HTTPRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
-    """Handler class for HTTP requests"""
-
-    # Disable illegal function name warnings
-    # pylint: disable=C0103
-    def do_GET(self):
-        """Responds to HTTP GET requests"""
-
-        if self.path == '/preseed':
-            with open('templates/preseed', 'r') as fd:
-                preseed = string.Template(fd.read())
-            self.send_response(200)
-            self.send_header('Content-type', 'text/html')
-            self.end_headers()
-            self.wfile.write(preseed.safe_substitute(
-                root_password=crypt.crypt(ROOT_PASSWORD, '$6$salt'),
-                finish_url='http://{}:{}/finish'.format(
-                    self.server.server_name, self.server.server_port)))
-        elif self.path == '/finish':
-            with open('templates/finish', 'r') as fd:
-                finish = fd.read()
-            self.send_response(200)
-            self.send_header('Content-type', 'text/html')
-            self.end_headers()
-            self.wfile.write(finish)
+def wait_for(proc, timeout=3600):
+    """Wait for a true condition"""
+    for delta in range(0, timeout):
+        if proc():
+            return delta
         else:
-            self.send_error(404)
-
-
-class WebServer(object):
-    """Container for webserver functionality"""
-
-    @staticmethod
-    def server_main(**kwargs):
-        """Server thread entry point"""
-
-        server = BaseHTTPServer.HTTPServer((kwargs['addr'], kwargs['port']), HTTPRequestHandler)
-        server.serve_forever()
-
-
-    @staticmethod
-    def start(addr, port):
-        """Webserver entry point"""
-
-        kwargs = {
-            'addr': addr,
-            'port': port
-        }
-        http_server = threading.Thread(target=WebServer.server_main, kwargs=kwargs)
-        http_server.daemon = True
-        http_server.start()
-
-
-class Subnet(object):
-    """Container for a sub network"""
-
-    def __init__(self, subnet, gateway, nameserver, vlan):
-        """Initialise a subnet"""
-
-        self.subnet = ipaddress.IPv4Network(subnet)
-        self.gateway = ipaddress.IPv4Address(gateway)
-        self.nameserver = ipaddress.IPv4Address(nameserver)
-        self.vlan = vlan
-        self.allocations = [self.gateway]
-
-
-    def get_netmask(self):
-        """Return the subnet mask"""
-
-        return self.subnet.netmask
-
-
-    def get_gateway(self):
-        """Return the default gateway"""
-
-        return self.gateway.exploded
-
-
-    def set_nameserver(self, nameserver):
-        """Set the nameserver"""
-
-        self.nameserver = ipaddress.IPv4Address(nameserver)
-
-
-    def get_nameserver(self):
-        """Get the nameserver"""
-
-        return self.nameserver.exploded
-
-
-    def get_vlan(self):
-        """Get the VLAN for the subnet"""
-
-        return self.vlan
-
-
-    def allocate_address(self, fixed=False):
-        """Try allocate a fixed address, or dynamic if not defined"""
-        if fixed:
-            address = ipaddress.IPv4Address(fixed)
-            if address not in self.subnet:
-                raise ValueError('address not in subnet')
-            if address in self.allocations:
-                raise ValueError('address allocation already exists')
-        else:
-            # Get the network prefix and convert to an integer
-            iaddress = struct.unpack('>I', self.subnet.network_address.packed)[0]
-            # Increment through the subnet and look for a spare address
-            # Note: num_addresses is 255 for a /24, by incrementing by 1 if no
-            # allocations are found then address is the boradcast address and
-            # we can trap the error condition
-            for _ in range(1, self.subnet.num_addresses + 1):
-                iaddress = iaddress + 1
-                address = ipaddress.IPv4Address(struct.pack('>I', iaddress))
-                if address not in self.allocations:
-                    break
-            if address == self.subnet.broadcast_address:
-                raise OverflowError('no free addresses')
-        self.allocations.append(address)
-        return address.exploded
+            time.sleep(1)
+    raise RuntimeError
 
 
 class Host(object):
@@ -203,7 +69,8 @@ class Host(object):
         self.networks = networks
         self.addresses = [subnet.allocate_address(address) for subnet, address in networks]
         self.ram = kwargs.get('ram', 512)
-        self.disk = kwargs.get('disk', 8)
+        self.disks = kwargs.get('disks', [8])
+        self.password = 'password'
 
 
     def primary_address(self):
@@ -231,46 +98,40 @@ class Host(object):
     def create(self):
         """Create a host, blocking until it is provisioned and SSH is running"""
 
-        info('Creating host {} ...'.format(self.name))
-        detail('Memory  {} MB'.format(self.ram))
-        detail('Disk    {} GB'.format(self.disk))
-        detail('Address {}'.format(self.primary_address()))
-        detail('Netmask {}'.format(self.primary_subnet().get_netmask()))
-        detail('Gateway {}'.format(self.primary_subnet().get_gateway()))
-        detail('DNS     {}'.format(self.primary_subnet().get_nameserver()))
+        bootstrap.info('Creating host {} ...'.format(self.name))
+        bootstrap.detail('Memory  {} MB'.format(self.ram))
+        bootstrap.detail('Disks   {} GB'.format(self.disks))
+        bootstrap.detail('Address {}'.format(self.primary_address()))
+        bootstrap.detail('Netmask {}'.format(self.primary_subnet().get_netmask()))
+        bootstrap.detail('Gateway {}'.format(self.primary_subnet().get_gateway()))
+        bootstrap.detail('DNS     {}'.format(self.primary_subnet().get_nameserver()))
 
-        # virt-install only accepts a bridge or network on the command line
-        # so tagged VLANs need to be defined before hand
-        info('Defining networks ...')
+        preseed = bootstrap.PreseedServerClient('localhost')
+        hypervisor = bootstrap.HypervisorClient('localhost')
+
+        # Create a preseed entry
+        metadata = {
+            'root_password': crypt.crypt(self.password, '$6$salt'),
+            'finish_url': 'http://{}:8421/hosts/{}/finish'.format(self.primary_subnet().get_gateway(), self.name),
+        }
+        preseed.host_create(self.name, 'preseed.xenial.erb', 'finish.xenial.erb', metadata)
+
+        # Create networks on the hypervisor
+        bootstrap.info('Creating networks ...')
         network_names = []
         for subnet, _ in self.networks:
-            network_name = '{}-vlan-{}'.format(self.name.replace('.', '_'), subnet.get_vlan())
-            network_names.append(network_name)
+            name = 'vlan:{}'.format(subnet.get_vlan())
+            network_names.append(name)
+            hypervisor.network_create(name, 'br0', subnet.get_vlan())
 
-            network = ET.Element('network')
-            name = ET.SubElement(network, 'name')
-            name.text = network_name
-            forward = ET.SubElement(network, 'forward')
-            forward.set('mode', 'bridge')
-            bridge = ET.SubElement(network, 'bridge')
-            bridge.set('name', 'br0')
-            virtualport = ET.SubElement(network, 'virtualport')
-            virtualport.set('type', 'openvswitch')
-            vlan = ET.SubElement(network, 'vlan')
-            tag = ET.SubElement(vlan, 'tag')
-            tag.set('id', subnet.get_vlan())
-            with open('/tmp/network.xml', 'w') as net_xml:
-                net_xml.write(ET.tostring(network))
-            subprocess.check_call(['virsh', 'net-create', '/tmp/network.xml'])
-
-        # Preseed defaults
+        # Set the preseed kernel command line parameters, mostly static network options
         extra_args = [
             'auto=true',
             'priority=critical',
             'vga=normal',
             'hostname={}'.format(self.name),
             'domain=example.com',
-            'url=http://{}:{}/preseed'.format(self.primary_subnet().get_gateway(), SERVER_PORT),
+            'url=http://{}:8421/hosts/{}/preseed'.format(self.primary_subnet().get_gateway(), self.name),
             'netcfg/choose_interface=auto',
             'netcfg/disable_autoconfig=true',
             'netcfg/get_ipaddress={}'.format(self.primary_address()),
@@ -280,68 +141,43 @@ class Host(object):
             'netcfg/confirm_static=true'
         ]
 
-        # Generic command options
-        command = [
-            'virt-install',
-            #'--debug', # Debug output to .cache/virt-manager/virt-install.log
-            '--name', self.name,
-            '--ram', '{}'.format(self.ram),
-            '--controller', 'type=scsi,model=virtio-scsi', # Needed for ceph provisioning
-            '--disk', '{}.img,size={},bus=scsi'.format(self.name, self.disk),
-            '--location', 'http://gb.archive.ubuntu.com/ubuntu/dists/xenial/main/installer-amd64',
-            '--extra-args', ' '.join(extra_args),
-            '--noautoconsole', # !!!!!! Causes operation to be non-blocking !!!!!!
-            '--serial', 'file,path=/tmp/{}.log'.format(self.name),
-            '--noreboot',
-        ]
+        # Create the host on the hypervisor
+        # This is a non-blocking operation, so we need to poll for completion
+        bootstrap.info('Creating host ...')
+        hypervisor.host_create(self.name, self.ram, self.disks, network_names,
+                               INSTALLER_LOCATION, ' '.join(extra_args))
+        delta = self.wait_for_state(hypervisor, 'shut off')
+        bootstrap.detail('Host created in {}s'.format(delta))
 
-        # Add in each network definition
-        for network_name in network_names:
-            command.append('--network')
-            command.append('network={}'.format(network_name))
+        bootstrap.info('Rebooting host ...')
+        hypervisor.host_start(self.name)
 
-        info('Beginning host install ...')
-        subprocess.check_call(command)
-        done = False
-        delta = 0
-        for i in range(0, 1200):
-            delta = i
-            lines = subprocess.check_output(['virsh', 'list', '--all']).split("\n")[2:-2]
-            for line in lines:
-                if self.name in line and 'shut off' in line:
-                    done = True
-                    break
-            if done:
-                break
-            time.sleep(1)
-        if not done:
-            raise RuntimeError('instance took too long to provision')
-        detail('Completed in {}s'.format(delta))
+        # Wait for SSH to become available for provisioning
+        bootstrap.info('Waiting for SSH ...')
+        delta = self.wait_for_port(22)
+        bootstrap.detail('Port listening in {}s'.format(delta))
 
-        command = [
-            'virsh',
-            'start',
-            self.name,
-        ]
+        # Clean up to the preseed server
+        preseed.host_delete(self.name)
 
-        info('Rebooting host ...')
-        subprocess.check_call(command)
 
-        done = False
-        for delta in range(0, 600):
-            command = ['nc', '-vz', self.primary_address(), '22']
+    def wait_for_state(self, hypervisor, state):
+        """Wait for a host to enter a specific state"""
+        def cond():
+            return hypervisor.host_get(self.name)['state'] == state
+        return wait_for(cond)
+
+
+    def wait_for_port(self, port):
+        """Wait for a port to start listening"""
+        def cond():
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             try:
-                subprocess.check_call(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            except subprocess.CalledProcessError:
-                time.sleep(1)
-            else:
-                done = True
-                break
-        if not done:
-            raise RuntimeError('instance took too long to reboot')
-
-        sys.stderr.write("\n")
-        detail('Started in {}s'.format(delta))
+                sock.connect((self.primary_address(), port))
+            except IOError:
+                return False
+            return True
+        return wait_for(cond)
 
 
     def ssh(self, command, **kwargs):
@@ -352,10 +188,10 @@ class Host(object):
         else:
             acceptable_exitcodes = [0]
 
-        info('Executing on {}: {}'.format(self.name, command))
+        bootstrap.info('Executing on {}: {}'.format(self.name, command))
         client = paramiko.client.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        client.connect(self.primary_address(), username='root', password=ROOT_PASSWORD)
+        client.connect(self.primary_address(), username='root', password=self.password)
         channel = client.get_transport().open_session()
         channel.set_combine_stderr(True)
         channel.exec_command(command)
@@ -364,7 +200,7 @@ class Host(object):
                 sys.stdout.write(channel.recv(8192))
             if channel.exit_status_ready():
                 break
-        detail("Exited with status {}".format(channel.recv_exit_status()))
+        bootstrap.detail("Exited with status {}".format(channel.recv_exit_status()))
         if channel.recv_exit_status() not in acceptable_exitcodes:
             raise RuntimeError('command execution failed')
 
@@ -372,10 +208,10 @@ class Host(object):
     def scp(self, source, target):
         """SCP a local file to a host"""
 
-        info('Copying {} to {} on {}'.format(source, target, self.name))
+        bootstrap.info('Copying {} to {} on {}'.format(source, target, self.name))
         client = paramiko.client.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        client.connect(self.primary_address(), username='root', password=ROOT_PASSWORD)
+        client.connect(self.primary_address(), username='root', password=self.password)
         sftp = client.open_sftp()
         sftp.put(source, target)
 
@@ -484,9 +320,6 @@ def main():
     config = ConfigParser.ConfigParser()
     config.read('config')
 
-    # Fire up a webserver on the router to serve preseeds
-    WebServer.start(u'10.25.192.1', SERVER_PORT)
-
     # Create the platform-services network, initially pointing at google for DNS
     #
     # 10.25.192.1 - Router
@@ -501,7 +334,7 @@ def main():
     # 10.25.192.10 - Foreman 0
     # 10.25.192.250 - Nameserver 0
     # 10.25.192.251 - Nameserver 1
-    subnet = Subnet(u'10.25.192.0/24', u'10.25.192.1', u'8.8.8.8', '292')
+    subnet = bootstrap.Subnet(u'10.25.192.0/24', u'10.25.192.1', u'8.8.8.8', '292')
 
     # Create the platform-services external network
     #
@@ -509,7 +342,7 @@ def main():
     # 185.43.217.138 - Load balancer VIP
     # 185.43.217.139 - Gateway 0
     # 185.43.217.140 - Gateway 1
-    extsubnet = Subnet(u'185.43.217.136/29', u'185.43.216.137', u'8.8.8.8', '516')
+    extsubnet = bootstrap.Subnet(u'185.43.217.136/29', u'185.43.216.137', u'8.8.8.8', '516')
 
     # Create the primary nameserver
     #

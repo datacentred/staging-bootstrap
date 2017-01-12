@@ -1,48 +1,28 @@
 #!/usr/bin/env python
 
-import os
-import subprocess
-import sys
+import bootstrap
 
 
-def get_guests():
-    """Get all guests on the system"""
-
-    # Get only lines containing guest declarations
-    out = subprocess.check_output(['virsh', 'list', '--all']).split("\n")[2:-2]
-
-    # Extract the guest names
-    return [x.split()[1] for x in out]
-
-
-def get_networks():
-    """Get all networks on the system"""
-
-    # Get only the lines containing network declarations
-    out = subprocess.check_output(['virsh', 'net-list']).split("\n")[3:-2]
-
-    # Extract the network names
-    return [x.split()[0] for x in out]
-
-
-def main(whitelist):
+def main():
     """Destroy any resources accociated with guests"""
 
-    guests = get_guests()
-    for guest in guests:
-        if len(whitelist) == 0 or guest in whitelist:
-            subprocess.check_call(['virsh', 'destroy', guest])
-            subprocess.check_call(['virsh', 'undefine', guest])
-            os.unlink('{}.img'.format(guest))
+    hypervisor = bootstrap.HypervisorClient('localhost')
 
-    networks = get_networks()
+    bootstrap.info('Deleting hosts ...')
+    hosts = hypervisor.host_list()
+    for host in hosts:
+        bootstrap.detail(host['name'])
+        hypervisor.host_delete(host['name'])
+
+    bootstrap.info('Deleting networks ...')
+    networks = hypervisor.network_list()
     for network in networks:
-        if len(whitelist) == 0 or any([network.startswith(x.replace('.', '_')) for x in whitelist]):
-            subprocess.check_call(['virsh', 'net-destroy', network])
+        bootstrap.detail(network['name'])
+        hypervisor.network_delete(network['name'])
 
 
 if __name__ == '__main__':
-    main(sys.argv[1:])
+    main()
 
 
 # vi: ts=4 et:

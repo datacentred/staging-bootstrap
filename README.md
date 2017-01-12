@@ -1,4 +1,4 @@
-#DataCentred Overcloud Staging Environment Bootstrapper
+#DataCentred Staging Environment Bootstrapper
 
 ##Description
 

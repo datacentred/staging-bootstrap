@@ -2,9 +2,9 @@
 Copyright (C) 2017 DataCentred Ltd - All Rights Reserved
 """
 
-from bootstrap import hypervisor_client
-from bootstrap.formatter import info
-from bootstrap.formatter import detail
+from staging_bootstrap import hypervisor_client
+from staging_bootstrap.formatter import info
+from staging_bootstrap.formatter import detail
 
 
 def main():

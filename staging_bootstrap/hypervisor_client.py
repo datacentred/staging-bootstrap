@@ -2,7 +2,7 @@
 Copyright (C) 2017 DataCentred Ltd - All Rights Reserved
 """
 
-from bootstrap import http_client
+from staging_bootstrap import http_client
 
 
 class HypervisorClient(http_client.HttpClient):

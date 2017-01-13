@@ -4,9 +4,9 @@ Copyright (C) 2017 DataCentred Ltd - All Rights Reserved
 
 import ConfigParser
 
-from bootstrap import dns as bs_dns
-from bootstrap import host as bs_host
-from bootstrap import subnet as bs_subnet
+from staging_bootstrap import dns as bs_dns
+from staging_bootstrap import host as bs_host
+from staging_bootstrap import subnet as bs_subnet
 
 # Disable long line warnings
 # pylint: disable=C0301

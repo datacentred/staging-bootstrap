@@ -9,7 +9,7 @@ for further provisioning of virtual machines.
 ## Building
 
     gem install fpm
-    fpm -s python -t deb .
+    fpm -s python -t deb --depends python-paramiko .
 
 ## Details
 

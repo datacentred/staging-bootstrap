@@ -7,15 +7,15 @@ Copyright (C) 2017 DataCentred Ltd - All Rights Reserved
 import setuptools
 
 setuptools.setup(
-    name = 'bootstrap',
+    name = 'staging_bootstrap',
     version = '0.0.1',
     packages = [
-        'bootstrap',
+        'staging_bootstrap',
     ],
     entry_points = {
         'console_scripts': [
-            'staging-create=bootstrap.create:main',
-            'staging-destroy=bootstrap.destroy:main',
+            'staging-create=staging_bootstrap.create:main',
+            'staging-destroy=staging_bootstrap.destroy:main',
         ],
     },
 )

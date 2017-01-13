@@ -11,11 +11,11 @@ import crypt
 import paramiko
 
 # Local imports
-from bootstrap import hypervisor_client
-from bootstrap import preseed_server_client
-from bootstrap.formatter import info
-from bootstrap.formatter import detail
-from bootstrap.util import wait_for
+from staging_bootstrap import hypervisor_client
+from staging_bootstrap import preseed_server_client
+from staging_bootstrap.formatter import info
+from staging_bootstrap.formatter import detail
+from staging_bootstrap.util import wait_for
 
 
 class Host(object):

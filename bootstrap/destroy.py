@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-
 """
 Copyright (C) 2017 DataCentred Ltd - All Rights Reserved
 """
@@ -25,10 +23,6 @@ def main():
     for network in networks:
         detail(network['name'])
         hypervisor.network_delete(network['name'])
-
-
-if __name__ == '__main__':
-    main()
 
 
 # vi: ts=4 et:

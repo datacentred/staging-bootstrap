@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 """
 Copyright (C) 2017 DataCentred Ltd - All Rights Reserved
 """
@@ -261,8 +260,5 @@ def main():
     # Prevent puppet runs until foreman is initialised with role data
     puppetca.puppet_disable()
 
-
-if __name__ == '__main__':
-    main()
 
 # vi: ts=4 et:

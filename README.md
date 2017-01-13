@@ -1,12 +1,17 @@
-#DataCentred Staging Environment Bootstrapper
+# DataCentred Staging Environment Bootstrapper
 
-##Description
+## Description
 
 Automates the process of bootstrapping a virtualized staging environment from establishment
 of an authoritative name service for the domain, through to a functioning Foreman installation
 for further provisioning of virtual machines.
 
-##Details
+## Building
+
+    gem install fpm
+    fpm -s python -t deb .
+
+## Details
 
 Allows the subnet and domain to be configured before creating a DNS name server with virt-install.
 Installation is via the Ubuntu network installer, preseeds and finish scripts (to configure
@@ -25,12 +30,3 @@ external VIP.  The X.509 certificate is signed with alternative name wildcards f
 internal and external domains.  An A record is added for the puppet service pointing to the
 internal VIP, then the puppet CA is reconfigured as an unencrypted service with all subsequent
 requests going via the gateway which performs SSL termination.
-
-##Prerequisites
-
-* Linux
-* Linux bridging
-* Qemu/KVM
-* Libvirt
-* Public/private hiera eyaml keys
-

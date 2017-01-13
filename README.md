@@ -9,7 +9,17 @@ for further provisioning of virtual machines.
 ## Building
 
     gem install fpm
-    fpm -s python -t deb --depends python-paramiko .
+    fpm -s python -t deb --depends python-paramiko --deb-default etc/default/staging-bootstrap .
+
+## Configuring
+
+Open the configuration file:
+
+    vim /etc/default/staging-boostrap
+
+Fill in the blanks.  The _github_ section takes a username and password which has read only
+access to a git repository containing puppet code.  The _eyaml_ section contains paths to
+PKCS7 keys used to decrypt hiera YAML data.
 
 ## Details
 

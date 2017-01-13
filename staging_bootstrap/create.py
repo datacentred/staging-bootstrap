@@ -49,7 +49,7 @@ def main():
     # pylint: disable=R0915
 
     config = ConfigParser.ConfigParser()
-    config.read('config')
+    config.read('/etc/default/staging-bootstrap')
 
     # Create the platform-services network, initially pointing at google for DNS
     #
@@ -123,8 +123,8 @@ def main():
         puppetca.install_puppet_modules('puppetlabs-stdlib')
         # Install manifest prerequisites
         puppetca.scp('files/puppet_ca/hiera.yaml', '/tmp/hiera.yaml')
-        puppetca.scp('files/puppet_ca/public_key.pkcs7.pem', '/tmp/public_key.pkcs7.pem')
-        puppetca.scp('files/puppet_ca/private_key.pkcs7.pem', '/tmp/private_key.pkcs7.pem')
+        puppetca.scp(config.get('eyaml', 'public_key'), '/tmp/public_key.pkcs7.pem')
+        puppetca.scp(config.get('eyaml', 'private_key'), '/tmp/private_key.pkcs7.pem')
         # Apply the manifest
         facts = {
             'deploy_user': config.get('github', 'user'),

@@ -1,0 +1,7 @@
+[github]
+user=username
+pass=password
+
+[eyaml]
+private_key=/etc/keys/private.pkcs7.pem
+public_key=/etc/keys/public.pkcs7.pem

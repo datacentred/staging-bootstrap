@@ -41,7 +41,7 @@ PUPPET_CONF_GATEWAY = {
         'dns_alt_names': '*.example.com,*.staging.datacentred.services',
     },
     'agent': {
-        'server': 'puppet.example.com',
+        'server': 'puppetca.example.com',
     },
 }
 
@@ -344,6 +344,16 @@ def main():
     # 185.43.217.140 - Gateway 1
     extsubnet = bootstrap.Subnet(u'185.43.217.136/29', u'185.43.216.137', u'8.8.8.8', '516')
 
+    default_facts = {
+        # This causes SSH to continue allowing root logins
+        'staging_bootstrap': 'true',
+    }
+
+    default_excludes = [
+        # Icinga2 requires storeconfigs which we don't have yet
+        '::dc_profile::mon::icinga2',
+    ]
+
     # Create the primary nameserver
     #
     # Establishes domain authority (e.g. ::domain and ::fqdn work)
@@ -403,14 +413,12 @@ def main():
         gateway0.scp('files/puppet/gateway/interfaces', '/tmp/interfaces')
         gateway0.ssh('cat /tmp/interfaces >> /etc/network/interfaces')
         gateway0.ssh('ifup ens4')
-        # Install prerequisite modules
-        gateway0.install_puppet_modules(['puppetlabs-apt', 'puppetlabs-haproxy', 'arioch-keepalived'])
-        # Generate the certificates
-        gateway0.ssh('/opt/puppetlabs/bin/puppet agent --test --server puppetca.example.com --tags non_existant', acceptable_exitcodes=[1])
+        ## Generate the certificates
+        gateway0.ssh('/opt/puppetlabs/bin/puppet agent --test --tags non_existant', acceptable_exitcodes=[1])
         puppetca.ssh('/opt/puppetlabs/bin/puppet cert --allow-dns-alt-names sign gateway0.example.com')
-        gateway0.ssh('/opt/puppetlabs/bin/puppet agent --test --server puppetca.example.com --tags non_existant')
-        # Apply the manifest
-        gateway0.puppet_apply('files/puppet/gateway/manifest.pp')
+        gateway0.puppet_agent('gateway', facts=default_facts, excludes=default_excludes)
+        # Prevent puppet runs until foreman is initialised with role data
+        gateway0.puppet_disable()
 
     # Swing puppet behind the load-balancer
     dns.A('puppet.example.com', '10.25.192.2')
@@ -418,16 +426,6 @@ def main():
     puppetca.scp('files/puppet/puppetca/puppetserver.conf', '/tmp/puppetserver.conf')
     puppetca.scp('files/puppet/puppetca/webserver.conf', '/tmp/webserver.conf')
     puppetca.puppet_apply('files/puppet/puppetca/manifest-2.pp')
-
-    default_facts = {
-        # This causes SSH to continue allowing root logins
-        'staging_bootstrap': 'true',
-    }
-
-    default_excludes = [
-        # Icinga2 requires storeconfigs which we don't have yet
-        '::dc_profile::mon::icinga2',
-    ]
 
     # Create the postgres master
     #
@@ -507,14 +505,6 @@ def main():
     # Bootstrap the primary nameserver fully
     ns0.puppet_agent('dns_master', facts=default_facts, excludes=default_excludes)
     ns0.puppet_disable()
-
-    # Bootstrap the gateway fully
-    #
-    # This will make puppetdb available via the load balancer when the puppet
-    # masters are fully provisioned
-    gateway0.puppet_agent('gateway', facts=default_facts, excludes=default_excludes)
-    # Prevent puppet runs until foreman is initialised with role data
-    gateway0.puppet_disable()
 
     # Create a puppet master
     #

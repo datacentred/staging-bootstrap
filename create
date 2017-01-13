@@ -164,6 +164,7 @@ class Host(object):
     def wait_for_state(self, hypervisor, state):
         """Wait for a host to enter a specific state"""
         def cond():
+            """Closure to poll host state"""
             return hypervisor.host_get(self.name)['state'] == state
         return wait_for(cond)
 
@@ -171,6 +172,7 @@ class Host(object):
     def wait_for_port(self, port):
         """Wait for a port to start listening"""
         def cond():
+            """Closure to socket state"""
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             try:
                 sock.connect((self.primary_address(), port))
@@ -366,7 +368,7 @@ def main():
         # Install prerequisite modules
         ns0.install_puppet_modules('theforeman-dns')
         # Apply the manifest
-        ns0.puppet_apply('files/puppet/dns_master/manifest.pp')
+        ns0.puppet_apply('manifests/dns_master/manifest.pp')
 
     # Update the subnet so subsequent hosts point at the nameserver
     subnet.set_nameserver(ns0.primary_address())
@@ -388,15 +390,15 @@ def main():
         # Install prerequisite modules
         puppetca.install_puppet_modules('puppetlabs-stdlib')
         # Install manifest prerequisites
-        puppetca.scp('files/puppet/puppetca/hiera.yaml', '/tmp/hiera.yaml')
-        puppetca.scp('files/puppet/puppetca/public_key.pkcs7.pem', '/tmp/public_key.pkcs7.pem')
-        puppetca.scp('files/puppet/puppetca/private_key.pkcs7.pem', '/tmp/private_key.pkcs7.pem')
+        puppetca.scp('files/puppet_ca/hiera.yaml', '/tmp/hiera.yaml')
+        puppetca.scp('files/puppet_ca/public_key.pkcs7.pem', '/tmp/public_key.pkcs7.pem')
+        puppetca.scp('files/puppet_ca/private_key.pkcs7.pem', '/tmp/private_key.pkcs7.pem')
         # Apply the manifest
         facts = {
             'deploy_user': config.get('github', 'user'),
             'deploy_pass': config.get('github', 'pass'),
         }
-        puppetca.puppet_apply('files/puppet/puppetca/manifest.pp', facts=facts)
+        puppetca.puppet_apply('manifests/puppet_ca/stage1/manifest.pp', facts=facts)
 
     # Create a gateway
     #
@@ -410,10 +412,10 @@ def main():
         gateway0.install_puppet()
         gateway0.configure_puppet(PUPPET_CONF_GATEWAY)
         # Configure (hack) public networking
-        gateway0.scp('files/puppet/gateway/interfaces', '/tmp/interfaces')
+        gateway0.scp('files/gateway/interfaces', '/tmp/interfaces')
         gateway0.ssh('cat /tmp/interfaces >> /etc/network/interfaces')
         gateway0.ssh('ifup ens4')
-        ## Generate the certificates
+        # Generate the certificates
         gateway0.ssh('/opt/puppetlabs/bin/puppet agent --test --tags non_existant', acceptable_exitcodes=[1])
         puppetca.ssh('/opt/puppetlabs/bin/puppet cert --allow-dns-alt-names sign gateway0.example.com')
         gateway0.puppet_agent('gateway', facts=default_facts, excludes=default_excludes)
@@ -422,10 +424,10 @@ def main():
 
     # Swing puppet behind the load-balancer
     dns.A('puppet.example.com', '10.25.192.2')
-    puppetca.scp('files/puppet/puppetca/auth.conf', '/tmp/auth.conf')
-    puppetca.scp('files/puppet/puppetca/puppetserver.conf', '/tmp/puppetserver.conf')
-    puppetca.scp('files/puppet/puppetca/webserver.conf', '/tmp/webserver.conf')
-    puppetca.puppet_apply('files/puppet/puppetca/manifest-2.pp')
+    puppetca.scp('files/puppet_ca/auth.conf', '/tmp/auth.conf')
+    puppetca.scp('files/puppet_ca/puppetserver.conf', '/tmp/puppetserver.conf')
+    puppetca.scp('files/puppet_ca/webserver.conf', '/tmp/webserver.conf')
+    puppetca.puppet_apply('manifests/puppet_ca/stage2/manifest.pp')
 
     # Create the postgres master
     #
@@ -473,8 +475,8 @@ def main():
  #   # Imbue puppet with store configs
  #   dns.A('puppetdb.example.com', u'10.25.192.2')
  #   puppetca.ssh('apt-get -y install puppetdb-termini')
- #   puppetca.scp('files/puppet/puppetca/routes.yaml', '/etc/puppetlabs/puppet/routes.yaml')
- #   puppetca.scp('files/puppet/puppetca/puppetdb.conf', '/etc/puppetlabs/puppet/puppetdb.conf')
+ #   puppetca.scp('files/puppet_ca/routes.yaml', '/etc/puppetlabs/puppet/routes.yaml')
+ #   puppetca.scp('files/puppet_ca/puppetdb.conf', '/etc/puppetlabs/puppet/puppetdb.conf')
  #   puppetca.configure_puppet(PUPPET_CONF_SERVER_WITH_PUPPETDB)
  #   puppetca.ssh('systemctl restart puppetserver')
 

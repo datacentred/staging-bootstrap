@@ -1,5 +1,4 @@
 *.img
-files/puppet/puppetca/private_key.pkcs7.pem
-files/puppet/puppetca/public_key.pkcs7.pem
+*.pem
 config
 *.pyc

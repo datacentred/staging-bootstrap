@@ -42,11 +42,6 @@ exec { "/opt/puppetlabs/bin/puppet cert generate ${::fqdn}":
   creates => "/etc/puppetlabs/puppet/ssl/certs/${::fqdn}.pem",
 } ->
 
-# Apply CA source hacks 
-#exec { "sed -i 's/unless options\\[:allow_dns_alt_names\\]/if false/' ${ca_source}":
-#  onlyif => "grep 'unless options\\[:allow_dns_alt_names\\]' ${ca_source}",
-#} ->
-
 # Enable wildcards
 exec { "sed -i 's/csr\\.subject_alt_names\\.any.*/false/' ${ca_source}":
   onlyif => "grep 'csr\\.subject_alt_names\\.any' ${ca_source}",

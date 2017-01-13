@@ -1,5 +1,7 @@
 #!/bin/bash
 
+# Copyright (C) 2017 DataCentred Ltd - All Rights Reserved
+
 # Create the external bridge
 sudo ovs-vsctl add-br br0
 sudo ip link set br0 up

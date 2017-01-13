@@ -1,5 +1,5 @@
-from .subnet import Subnet
-from .hypervisor_client import HypervisorClient
-from .preseed_server_client import PreseedServerClient
-from .formatter import info
-from .formatter import detail
+"""
+Copyright (C) 2017 DataCentred Ltd - All Rights Reserved
+"""
+
+# vi: ts=4 et:

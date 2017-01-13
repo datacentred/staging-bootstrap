@@ -1,23 +1,29 @@
 #!/usr/bin/env python
 
-import bootstrap
+"""
+Copyright (C) 2017 DataCentred Ltd - All Rights Reserved
+"""
+
+from bootstrap import hypervisor_client
+from bootstrap.formatter import info
+from bootstrap.formatter import detail
 
 
 def main():
     """Destroy any resources accociated with guests"""
 
-    hypervisor = bootstrap.HypervisorClient('localhost')
+    hypervisor = hypervisor_client.HypervisorClient('localhost')
 
-    bootstrap.info('Deleting hosts ...')
+    info('Deleting hosts ...')
     hosts = hypervisor.host_list()
     for host in hosts:
-        bootstrap.detail(host['name'])
+        detail(host['name'])
         hypervisor.host_delete(host['name'])
 
-    bootstrap.info('Deleting networks ...')
+    info('Deleting networks ...')
     networks = hypervisor.network_list()
     for network in networks:
-        bootstrap.detail(network['name'])
+        detail(network['name'])
         hypervisor.network_delete(network['name'])
 
 

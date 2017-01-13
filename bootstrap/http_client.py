@@ -1,5 +1,10 @@
+"""
+Copyright (C) 2017 DataCentred Ltd - All Rights Reserved
+"""
+
 import httplib
 import json
+
 
 class HttpClient(object):
     """Class for interacting with hypervisors"""

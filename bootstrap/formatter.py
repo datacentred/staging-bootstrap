@@ -1,4 +1,9 @@
+"""
+Copyright (C) 2017 DataCentred Ltd - All Rights Reserved
+"""
+
 import sys
+
 
 def info(message):
     """Echos a message to stdout with infomational priority"""
@@ -14,3 +19,6 @@ def detail(message):
     sys.stdout.write("    [1m{}[0m".format(message))
     if message[-1] != "\n":
         sys.stdout.write("\n")
+
+
+# vi: ts=4 et:

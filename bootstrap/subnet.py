@@ -1,13 +1,17 @@
+"""
+Copyright (C) 2017 DataCentred Ltd - All Rights Reserved
+"""
+
 import struct
 
 import ipaddress
+
 
 class Subnet(object):
     """Container for a sub network"""
 
     def __init__(self, subnet, gateway, nameserver, vlan):
         """Initialise a subnet"""
-
         self.subnet = ipaddress.IPv4Network(subnet)
         self.gateway = ipaddress.IPv4Address(gateway)
         self.nameserver = ipaddress.IPv4Address(nameserver)
@@ -17,31 +21,26 @@ class Subnet(object):
 
     def get_netmask(self):
         """Return the subnet mask"""
-
         return self.subnet.netmask
 
 
     def get_gateway(self):
         """Return the default gateway"""
-
         return self.gateway.exploded
 
 
     def set_nameserver(self, nameserver):
         """Set the nameserver"""
-
         self.nameserver = ipaddress.IPv4Address(nameserver)
 
 
     def get_nameserver(self):
         """Get the nameserver"""
-
         return self.nameserver.exploded
 
 
     def get_vlan(self):
         """Get the VLAN for the subnet"""
-
         return self.vlan
 
 
@@ -69,5 +68,6 @@ class Subnet(object):
                 raise OverflowError('no free addresses')
         self.allocations.append(address)
         return address.exploded
+
 
 # vi: ts=4 et:

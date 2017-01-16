@@ -50,11 +50,12 @@ class Host(object):
     def exists(self):
         """Check if a host exists"""
 
-        lines = subprocess.check_output(['virsh', 'list', '--all']).split("\n")[2:-2]
-        for line in lines:
-            if self.name in line:
-                return True
-        return False
+        hypervisor = hypervisor_client.HypervisorClient('localhost')
+        try:
+            hypervisor.host_get(self.name)
+        except RuntimeError:
+            return False
+        return True
 
 
     def create(self):

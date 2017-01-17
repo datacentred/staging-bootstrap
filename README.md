@@ -8,6 +8,7 @@ for further provisioning of virtual machines.
 
 ## Building
 
+    apt-get -y install python-setuptools gcc make libffi-dev
     gem install fpm
     fpm -s python -t deb --depends python-paramiko --deb-default etc/default/staging-bootstrap .
 

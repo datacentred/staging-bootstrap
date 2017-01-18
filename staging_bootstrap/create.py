@@ -68,7 +68,15 @@ def main():
     # 10.25.192.10 - Foreman 0
     # 10.25.192.250 - Nameserver 0
     # 10.25.192.251 - Nameserver 1
-    subnet = bs_subnet.Subnet(u'10.25.192.0/24', u'10.25.192.1', u'8.8.8.8', '292')
+    subnet = bs_subnet.Subnet({
+        'cidr': '10.25.192.0/24',
+        'gateway': '10.25.192.1',
+        'nameservers': [
+            '10.25.192.250',
+            '10.25.192.251'
+        ],
+        'vlan': 292
+    })
 
     # Create the platform-services external network
     #
@@ -76,7 +84,10 @@ def main():
     # 185.43.217.138 - Load balancer VIP
     # 185.43.217.139 - Gateway 0
     # 185.43.217.140 - Gateway 1
-    extsubnet = bs_subnet.Subnet(u'185.43.217.136/29', u'185.43.216.137', u'8.8.8.8', '516')
+    extsubnet = bs_subnet.Subnet({
+        'cidr': '185.43.217.136/29',
+        'vlan': '516',
+    })
 
     default_facts = {
         # This causes SSH to continue allowing root logins
@@ -95,7 +106,7 @@ def main():
     #
     # Establishes domain authority (e.g. ::domain and ::fqdn work)
     # Allows creation of DNS A and PTR records for hosts
-    ns0 = bs_host.Host('ns0.example.com', [(subnet, u'10.25.192.250')])
+    ns0 = bs_host.Host('ns0.example.com', [(subnet, u'10.25.192.250')], nameservers=['8.8.8.8'])
     if not ns0.exists():
         ns0.create()
         ns0.install_puppet()
@@ -104,9 +115,6 @@ def main():
         ns0.install_puppet_modules('theforeman-dns')
         # Apply the manifest
         ns0.puppet_apply(resource_filename('staging_bootstrap', 'data/manifests/dns_master/manifest.pp'))
-
-    # Update the subnet so subsequent hosts point at the nameserver
-    subnet.set_nameserver(ns0.primary_address())
 
     # Create the DNS helper
     dns = bs_dns.DNS(ns0)

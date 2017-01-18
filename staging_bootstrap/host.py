@@ -29,10 +29,12 @@ class Host(object):
 
         self.name = name
         self.networks = networks
-        self.addresses = [subnet.allocate_address(address) for subnet, address in networks]
+        self.addresses = [address for _, address in networks]
         self.ram = kwargs.get('ram', 512)
         self.disks = kwargs.get('disks', [8])
         self.password = 'password'
+        if 'nameservers' in kwargs:
+            self.nameservers = kwargs['nameservers']
 
 
     def primary_address(self):
@@ -61,13 +63,18 @@ class Host(object):
     def create(self):
         """Create a host, blocking until it is provisioned and SSH is running"""
 
+        if hasattr(self, 'nameservers'):
+            nameservers = self.nameservers
+        else:
+            nameservers = self.primary_subnet().nameservers
+
         info('Creating host {} ...'.format(self.name))
         detail('Memory  {} MB'.format(self.ram))
         detail('Disks   {} GB'.format(self.disks))
         detail('Address {}'.format(self.primary_address()))
-        detail('Netmask {}'.format(self.primary_subnet().get_netmask()))
-        detail('Gateway {}'.format(self.primary_subnet().get_gateway()))
-        detail('DNS     {}'.format(self.primary_subnet().get_nameserver()))
+        detail('Netmask {}'.format(self.primary_subnet().netmask))
+        detail('Gateway {}'.format(self.primary_subnet().gateway))
+        detail('DNS     {}'.format(nameservers))
 
         preseed = preseed_server_client.PreseedServerClient('localhost')
         hypervisor = hypervisor_client.HypervisorClient('localhost')
@@ -75,7 +82,7 @@ class Host(object):
         # Create a preseed entry
         metadata = {
             'root_password': crypt.crypt(self.password, '$6$salt'),
-            'finish_url': 'http://{}:8421/hosts/{}/finish'.format(self.primary_subnet().get_gateway(), self.name),
+            'finish_url': 'http://{}:8421/hosts/{}/finish'.format(self.primary_subnet().gateway, self.name),
         }
         preseed.host_create(self.name, 'preseed.xenial.erb', 'finish.xenial.erb', metadata)
 
@@ -83,9 +90,9 @@ class Host(object):
         info('Creating networks ...')
         network_names = []
         for subnet, _ in self.networks:
-            name = 'vlan:{}'.format(subnet.get_vlan())
+            name = 'vlan:{}'.format(subnet.vlan)
             network_names.append(name)
-            hypervisor.network_create(name, 'br0', subnet.get_vlan())
+            hypervisor.network_create(name, 'br0', subnet.vlan)
 
         # Set the preseed kernel command line parameters, mostly static network options
         extra_args = [
@@ -94,13 +101,13 @@ class Host(object):
             'vga=normal',
             'hostname={}'.format(self.name),
             'domain=example.com',
-            'url=http://{}:8421/hosts/{}/preseed'.format(self.primary_subnet().get_gateway(), self.name),
+            'url=http://{}:8421/hosts/{}/preseed'.format(self.primary_subnet().gateway, self.name),
             'netcfg/choose_interface=auto',
             'netcfg/disable_autoconfig=true',
             'netcfg/get_ipaddress={}'.format(self.primary_address()),
-            'netcfg/get_netmask={}'.format(self.primary_subnet().get_netmask()),
-            'netcfg/get_gateway={}'.format(self.primary_subnet().get_gateway()),
-            'netcfg/get_nameservers={}'.format(self.primary_subnet().get_nameserver()),
+            'netcfg/get_netmask={}'.format(self.primary_subnet().netmask),
+            'netcfg/get_gateway={}'.format(self.primary_subnet().gateway),
+            'netcfg/get_nameservers="{}"'.format(' '.join(nameservers)),
             'netcfg/confirm_static=true'
         ]
 

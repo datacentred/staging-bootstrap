@@ -80,7 +80,7 @@ hosts:
   ns0.example.com:
     role: 'dns_master'
     networks:
-      ens3:
+      - interface: 'ens3'
         subnet: 'core-platform-services'
         address: '10.25.192.250'
         nameservers:
@@ -88,30 +88,30 @@ hosts:
   ns1.example.com:
     role: 'dns_slave'
     networks:
-      ens3:
+      - interface: 'ens3'
         subnet: 'core-platform-services'
         address: '10.25.192.251'
   puppetca.example.com:
     role: 'puppet_ca'
     memory: 4096
     networks:
-      ens3:
+      - interface: 'ens3'
         subnet: 'core-platform-services'
         address: '10.25.192.3'
   puppet0.example.com:
     role: 'puppet_master'
     memory: 4096
     networks:
-      ens3:
+      - interface: 'ens3'
         subnet: 'core-platform-services'
         address: '10.25.192.4'
   gateway0.example.com:
     role: 'gateway'
     networks:
-      ens3:
+      - interface: 'ens3'
         subnet: 'core-platform-services'
         address: '10.25.192.5'
-      ens4:
+      - interface: 'ens4'
         subnet: 'core-internet'
         address: '185.43.217.139'
         options:
@@ -122,10 +122,10 @@ hosts:
   gateway1.example.com:
     role: 'gateway'
     networks:
-      ens3:
+      - interface: 'ens3'
         subnet: 'core-platform-services'
         address: '10.25.192.6'
-      ens4:
+      - interface: 'ens4'
         subnet: 'core-internet'
         address: '185.43.217.140'
         options:
@@ -137,26 +137,26 @@ hosts:
     role: 'postgresql_master'
     memory: 4096
     networks:
-      ens3:
+      - interface: 'ens3'
         subnet: 'core-platform-services'
         address: '10.25.192.7'
   postgres1.example.com:
     role: 'postgresql_master'
     memory: 4096
     networks:
-      ens3:
+      - interface: 'ens3'
         subnet: 'core-platform-services'
         address: '10.25.192.8'
   puppetdb0.example.com:
     role: 'puppetdb'
     networks:
-      ens3:
+      - interface: 'ens3'
         subnet: 'core-platform-services'
         address: '10.25.192.9'
   foreman0.example.com:
     role: 'foreman'
     networks:
-      ens3:
+      - interface: 'ens3'
         subnet: 'core-platform-services'
         address: '10.25.192.10'
 

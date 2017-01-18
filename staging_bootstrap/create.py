@@ -40,9 +40,6 @@ PUPPET_CONF_GATEWAY = {
     },
 }
 
-# Where to install our boxen from
-INSTALLER_LOCATION = 'http://gb.archive.ubuntu.com/ubuntu/dists/xenial/main/installer-amd64'
-
 
 def main():
     """Where the magic happens"""
@@ -63,14 +60,23 @@ def main():
         '::dc_profile::mon::icinga2',
     ]
 
-    # Set the image used to create instances
-    bs_host.Host.location = INSTALLER_LOCATION
-
     # Create the primary nameserver
     #
     # Establishes domain authority (e.g. ::domain and ::fqdn work)
     # Allows creation of DNS A and PTR records for hosts
-    ns0 = bs_host.Host('ns0.example.com', [('core-platform-services', u'10.25.192.250')], nameservers=['8.8.8.8'])
+    ns0 = bs_host.Host('ns0.example.com', {
+        'role': 'dns_master',
+         'networks': [
+            {
+                'interface': 'ens3',
+                'subnet': 'core-platform-services',
+                'address': '10.25.192.250',
+                'nameservers': [
+                    '8.8.8.8',
+                ]
+            },
+        ],
+    })
     if not ns0.exists():
         ns0.create()
         ns0.install_puppet()
@@ -88,7 +94,17 @@ def main():
     # Allows creation of SSL certificates, in particular the load-balancer so
     # that we can start refering to puppet.staging.datacentred.services generically
     # on all nodes
-    puppetca = bs_host.Host('puppetca.example.com', [('core-platform-services', u'10.25.192.3')], ram=4096)
+    puppetca = bs_host.Host('puppetca.example.com', {
+        'role': 'puppet_ca',
+        'memory': 4096,
+        'networks':  [
+            {
+                'interface': 'ens3',
+                'subnet': 'core-platform-services',
+                'address': '10.25.192.3',
+            },
+        ],
+    })
     dns.default(puppetca)
     if not puppetca.exists():
         puppetca.create()
@@ -112,7 +128,27 @@ def main():
     # All services from both example.com and cloud.example.com are accessed via this
     # load-balancer.  Once up we can begin using the Puppet CA server to provision
     # with production code
-    gateway0 = bs_host.Host('gateway0.example.com', [('core-platform-services', u'10.25.192.5'), ('core-internet', u'185.43.217.139')])
+    gateway0 = bs_host.Host('gateway0.example.com', {
+        'role': 'gateway',
+        'networks':  [
+            {
+                'interface': 'ens3',
+                'subnet': 'core-platform-services',
+                'address': '10.25.192.5',
+            },
+            {
+                'interface': 'ens4',
+                'subnet': 'core-internet',
+                'address': '185.43.217.139',
+                'options': [
+                    'post-up ip route replace default via 185.43.217.137',
+                    'post-up ip route add 10.0.0.0/8 via 10.25.192.1',
+                    'pre-down ip route del 10.0.0.0/8 via 10.25.192.1',
+                    'pre-down ip route replace default via 10.25.192.1',
+                ],
+            },
+        ],
+    })
     dns.default(gateway0)
     if not gateway0.exists():
         gateway0.create()
@@ -141,7 +177,17 @@ def main():
     # Backend database used by puppetdb and foreman
     #
     # NOTE: Needs at least 4GB RAM for PGSQL to provision without modification
-    postgres0 = bs_host.Host('postgres0.example.com', [('core-platform-services', u'10.25.192.7')], ram=8192)
+    postgres0 = bs_host.Host('postgres0.example.com', {
+        'role': 'postgresql_master',
+        'memory': 8192,
+        'networks':  [
+            {
+                'interface': 'ens3',
+                'subnet': 'core-platform-services',
+                'address': '10.25.192.7',
+            },
+        ],
+    })
     dns.default(postgres0)
     if not postgres0.exists():
         postgres0.create()
@@ -155,7 +201,17 @@ def main():
     #
     # Functionally not required yet as it's a hot standby, but it's probably
     # easier to have the databases synchronized from the outset
-    postgres1 = bs_host.Host('postgres1.example.com', [('core-platform-services', u'10.25.192.8')], ram=8192)
+    postgres1 = bs_host.Host('postgres1.example.com', {
+        'role': 'postgresql_slave',
+        'memory': 8192,
+        'networks':  [
+            {
+                'interface': 'ens3',
+                'subnet': 'core-platform-services',
+                'address': '10.25.192.8',
+            },
+        ],
+    })
     dns.default(postgres1)
     if not postgres1.exists():
         postgres1.create()
@@ -169,7 +225,16 @@ def main():
     #
     # Allows code reliant on storeconfigs to work, for example service discovery
     # for monitoring will now work
-    puppetdb0 = bs_host.Host('puppetdb0.example.com', [('core-platform-services', u'10.25.192.9')])
+    puppetdb0 = bs_host.Host('puppetdb0.example.com', {
+        'role': 'puppetdb',
+        'networks':  [
+            {
+                'interface': 'ens3',
+                'subnet': 'core-platform-services',
+                'address': '10.25.192.9',
+            },
+        ],
+    })
     dns.default(puppetdb0)
     if not puppetdb0.exists():
         puppetdb0.create()
@@ -188,7 +253,16 @@ def main():
  #   puppetca.ssh('systemctl restart puppetserver')
 
     # Create foreman
-    foreman0 = bs_host.Host('foreman0.example.com', [('core-platform-services', u'10.25.192.10')])
+    foreman0 = bs_host.Host('foreman0.example.com', {
+        'role': 'foreman',
+        'networks':  [
+            {
+                'interface': 'ens3',
+                'subnet': 'core-platform-services',
+                'address': '10.25.192.10',
+            },
+        ],
+    })
     dns.default(foreman0)
     if not foreman0.exists():
         foreman0.create()
@@ -201,7 +275,16 @@ def main():
         foreman0.ssh('foreman-rake permissions:reset password=password')
 
     # Create the secondary nameserver
-    ns1 = bs_host.Host('ns1.example.com', [('core-platform-services', u'10.25.192.251')])
+    ns1 = bs_host.Host('ns1.example.com', {
+        'role': 'dns_slave',
+        'networks':  [
+            {
+                'interface': 'ens3',
+                'subnet': 'core-platform-services',
+                'address': '10.25.192.251',
+            },
+        ],
+    })
     dns.default(ns1)
     if not ns1.exists():
         ns1.create()
@@ -220,7 +303,16 @@ def main():
     # This is required for the synchronization agents on the master to work
     # e.g. lsyncd will not work unless the target is defined.  This will also
     # enable storeconfigs and foreman reports
-    puppet0 = bs_host.Host('puppet0.example.com', [('core-platform-services', u'10.25.192.4')])
+    puppet0 = bs_host.Host('puppet0.example.com', {
+        'role': 'puppet_master',
+        'networks':  [
+            {
+                'interface': 'ens3',
+                'subnet': 'core-platform-services',
+                'address': '10.25.192.4',
+            },
+        ],
+    })
     dns.default(puppet0)
     if not puppet0.exists():
         puppet0.create()

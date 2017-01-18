@@ -18,7 +18,7 @@ class DNS(object):
     def A(self, fqdn, ip):
         """Add an A record"""
 
-        if ip not in subprocess.check_output(['dig', '@' + self.host.primary_address(), '+short', fqdn, 'A']):
+        if ip not in subprocess.check_output(['dig', '@' + self.host.get_network_config('address'), '+short', fqdn, 'A']):
             self.host.ssh('echo -e "server 127.0.0.1\nupdate add {} 604800 A {}\nsend" | nsupdate -k /etc/bind/rndc.key'.format(fqdn, ip))
 
 
@@ -26,12 +26,12 @@ class DNS(object):
         """Add a PTR record"""
 
         arpa = '.'.join(reversed(ip.split('.'))) + '.in-addr.arpa'
-        if fqdn not in subprocess.check_output(['dig', '@' + self.host.primary_address(), '+short', arpa, 'PTR']):
+        if fqdn not in subprocess.check_output(['dig', '@' + self.host.get_network_config('address'), '+short', arpa, 'PTR']):
             self.host.ssh('echo -e "server 127.0.0.1\nupdate add {} 604800 PTR {}\nsend" | nsupdate -k /etc/bind/rndc.key'.format(arpa, fqdn))
 
 
     def default(self, host):
         """Add default A and PTR records for a host"""
 
-        self.A(host.name, host.primary_address())
-        self.PTR(host.name, host.primary_address())
+        self.A(host.name, host.get_network_config('address'))
+        self.PTR(host.name, host.get_network_config('address'))

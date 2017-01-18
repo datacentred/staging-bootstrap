@@ -23,32 +23,34 @@ class Host(object):
     """Container for a host object"""
 
     # Class variable to hold install location
-    location = ""
+    defaults = {
+        'memory': 512,
+        'disks': [
+            8,
+        ],
+        'password': 'password',
+        'location': 'http://gb.archive.ubuntu.com/ubuntu/dists/xenial/main/installer-amd64',
+    }
 
-    def __init__(self, name, networks, **kwargs):
-        """Initialise a host"""
-
+    def __init__(self, name, value):
         self.name = name
-        self.networks = networks
-        self.addresses = [address for _, address in networks]
-        self.ram = kwargs.get('ram', 512)
-        self.disks = kwargs.get('disks', [8])
-        self.password = 'password'
-        if 'nameservers' in kwargs:
-            self.nameservers = kwargs['nameservers']
+        self.config = value
 
 
-    def primary_address(self):
-        """Returns the primary IP address"""
+    def get_config(self, name):
+        if name in self.config:
+            return self.config[name]
+        return self.defaults[name]
 
-        return self.addresses[0]
 
-
-    def primary_subnet(self):
-        """Returns the primary subnet"""
+    def get_network_config(self, name):
+        network = self.config['networks'][0]
+        if name in network:
+            return network[name]
 
         subnets = configure.subnets()
-        return subnets[self.networks[0][0]]
+        subnet = subnets[network['subnet']]
+        return getattr(subnet, name)
 
 
     def exists(self):
@@ -65,17 +67,23 @@ class Host(object):
     def create(self):
         """Create a host, blocking until it is provisioned and SSH is running"""
 
-        if hasattr(self, 'nameservers'):
-            nameservers = self.nameservers
-        else:
-            nameservers = self.primary_subnet().nameservers
+        memory = self.get_config('memory')
+        disks = self.get_config('disks')
+        password = self.get_config('password')
+        location = self.get_config('location')
+
+        address = self.get_network_config('address')
+        netmask = self.get_network_config('netmask')
+        gateway = self.get_network_config('gateway')
+        vlan = self.get_network_config('vlan')
+        nameservers = self.get_network_config('nameservers')
 
         info('Creating host {} ...'.format(self.name))
-        detail('Memory  {} MB'.format(self.ram))
-        detail('Disks   {} GB'.format(self.disks))
-        detail('Address {}'.format(self.primary_address()))
-        detail('Netmask {}'.format(self.primary_subnet().netmask))
-        detail('Gateway {}'.format(self.primary_subnet().gateway))
+        detail('Memory  {} MB'.format(memory))
+        detail('Disks   {} GB'.format(disks))
+        detail('Address {}'.format(address))
+        detail('Netmask {}'.format(netmask))
+        detail('Gateway {}'.format(gateway))
         detail('DNS     {}'.format(nameservers))
 
         preseed = preseed_server_client.PreseedServerClient('localhost')
@@ -83,8 +91,8 @@ class Host(object):
 
         # Create a preseed entry
         metadata = {
-            'root_password': crypt.crypt(self.password, '$6$salt'),
-            'finish_url': 'http://{}:8421/hosts/{}/finish'.format(self.primary_subnet().gateway, self.name),
+            'root_password': crypt.crypt(password, '$6$salt'),
+            'finish_url': 'http://{}:8421/hosts/{}/finish'.format(gateway, self.name),
         }
         preseed.host_create(self.name, 'preseed.xenial.erb', 'finish.xenial.erb', metadata)
 
@@ -92,10 +100,10 @@ class Host(object):
         info('Creating networks ...')
         network_names = []
         subnets = configure.subnets()
-        for subnet, _ in self.networks:
-            name = 'vlan:{}'.format(subnets[subnet].vlan)
+        for network in self.config['networks']:
+            name = 'vlan:{}'.format(vlan)
             network_names.append(name)
-            hypervisor.network_create(name, 'br0', subnets[subnet].vlan)
+            hypervisor.network_create(name, 'br0', vlan)
 
         # Set the preseed kernel command line parameters, mostly static network options
         extra_args = [
@@ -104,12 +112,12 @@ class Host(object):
             'vga=normal',
             'hostname={}'.format(self.name),
             'domain=example.com',
-            'url=http://{}:8421/hosts/{}/preseed'.format(self.primary_subnet().gateway, self.name),
+            'url=http://{}:8421/hosts/{}/preseed'.format(gateway, self.name),
             'netcfg/choose_interface=auto',
             'netcfg/disable_autoconfig=true',
-            'netcfg/get_ipaddress={}'.format(self.primary_address()),
-            'netcfg/get_netmask={}'.format(self.primary_subnet().netmask),
-            'netcfg/get_gateway={}'.format(self.primary_subnet().gateway),
+            'netcfg/get_ipaddress={}'.format(address),
+            'netcfg/get_netmask={}'.format(netmask),
+            'netcfg/get_gateway={}'.format(gateway),
             'netcfg/get_nameservers="{}"'.format(' '.join(nameservers)),
             'netcfg/confirm_static=true'
         ]
@@ -117,8 +125,8 @@ class Host(object):
         # Create the host on the hypervisor
         # This is a non-blocking operation, so we need to poll for completion
         info('Creating host ...')
-        hypervisor.host_create(self.name, self.ram, self.disks, network_names,
-                               self.location, ' '.join(extra_args))
+        hypervisor.host_create(self.name, memory, disks, network_names,
+                               location, ' '.join(extra_args))
         delta = self.wait_for_state(hypervisor, 'shut off')
         detail('Host created in {}s'.format(delta))
 
@@ -146,9 +154,10 @@ class Host(object):
         """Wait for a port to start listening"""
         def cond():
             """Closure to socket state"""
+            address = self.get_network_config('address')
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             try:
-                sock.connect((self.primary_address(), port))
+                sock.connect((address, port))
             except IOError:
                 return False
             return True
@@ -166,7 +175,7 @@ class Host(object):
         info('Executing on {}: {}'.format(self.name, command))
         client = paramiko.client.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        client.connect(self.primary_address(), username='root', password=self.password)
+        client.connect(self.get_network_config('address'), username='root', password=self.get_config('password'))
         channel = client.get_transport().open_session()
         channel.set_combine_stderr(True)
         channel.exec_command(command)
@@ -186,7 +195,7 @@ class Host(object):
         info('Copying {} to {} on {}'.format(source, target, self.name))
         client = paramiko.client.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        client.connect(self.primary_address(), username='root', password=self.password)
+        client.connect(self.get_network_config('address'), username='root', password=self.get_config('password'))
         sftp = client.open_sftp()
         sftp.put(source, target)
 

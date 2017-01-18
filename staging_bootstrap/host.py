@@ -13,6 +13,7 @@ import paramiko
 # Local imports
 from staging_bootstrap import hypervisor_client
 from staging_bootstrap import preseed_server_client
+from staging_bootstrap.configure import Configure as configure
 from staging_bootstrap.formatter import info
 from staging_bootstrap.formatter import detail
 from staging_bootstrap.util import wait_for
@@ -46,7 +47,8 @@ class Host(object):
     def primary_subnet(self):
         """Returns the primary subnet"""
 
-        return self.networks[0][0]
+        subnets = configure.subnets()
+        return subnets[self.networks[0][0]]
 
 
     def exists(self):
@@ -89,10 +91,11 @@ class Host(object):
         # Create networks on the hypervisor
         info('Creating networks ...')
         network_names = []
+        subnets = configure.subnets()
         for subnet, _ in self.networks:
-            name = 'vlan:{}'.format(subnet.vlan)
+            name = 'vlan:{}'.format(subnets[subnet].vlan)
             network_names.append(name)
-            hypervisor.network_create(name, 'br0', subnet.vlan)
+            hypervisor.network_create(name, 'br0', subnets[subnet].vlan)
 
         # Set the preseed kernel command line parameters, mostly static network options
         extra_args = [

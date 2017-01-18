@@ -1,0 +1,175 @@
+---
+# Configuration
+# -------------
+# Arbitrary configuration data available via the config API
+
+config:
+  github:
+    username: 'CHANGEME'
+    password: 'CHANGEME'
+  eyaml:
+    private_key: 'CHANGEME'
+    public_key: 'CHANGEME'
+
+# Hypervisors
+# -----------
+# List of hypervisors to use for scheduling hosts on to
+
+hypervisors:
+  - 'localhost'
+
+# Puppet configurations
+# ---------------------
+# Hosts automatically install the default during initial host install
+# The default can be overridden if a configuration matches the host's
+# role
+
+puppet:
+  config:
+    default:
+      agent:
+        server: 'puppet.example.com'
+    gateway:
+      main:
+        dns_alt_names: '*.example.com,*.staging.datacentred.services'
+      agent:
+        server: 'puppet.example.com'
+
+# Subnets
+# -------
+# Subnets define at least a prefix used to validate static addresses
+# associated with hosts.  Additional parameters may be passed, in particular
+# a gateway and nameserver must be specified for a provisioning network.
+# These will be used to pass static address information to the preseed.
+# Default parameters for a subnet can be overridden at the host network
+# definition.  Additional options can be specified which will be appended to
+# the network configuration file.
+
+subnets:
+  core-platform-services:
+    cidr: '10.25.192.0/24'
+    gateway: '10.25.192.1'
+    vlan: 292
+    nameservers:
+      - '10.25.192.250'
+      - '10.25.192.251'
+  core-internet:
+    cidr: '185.43.216.136/29'
+    vlan: 516
+
+# Hosts
+# -----
+# Hosts define individual virtual machines identified by their fully
+# quallified domain names.  When refered to in the DSL a host will be
+# provisioned if not yet.  This will add A and PTR records automatically
+# to a DNS server defined for the domain.  The machine will then be
+# provisioned on a hypervisor.  Defaults can be provided to select the
+# amount of memory and number and size of disks, default root password
+# associated with the VM used for provisioning (if blank it will be
+# generated ephemerally), and a kernel image location.  Parameters can
+# be overridden on a per host basis.  Each host also defines a hash of
+# metworks to provision which map to subnets defined above.
+
+hosts:
+  defaults:
+    memory: 512
+    disks:
+      - 8
+    password: 'password'
+    location: 'http://gb.archive.ubuntu.com/ubuntu/dists/xenial/main/installer-amd64'
+  ns0.example.com:
+    role: 'dns_master'
+    networks:
+      ens3:
+        subnet: 'core-platform-services'
+        address: '10.25.192.250'
+        nameservers:
+          - '8.8.8.8'
+  ns1.example.com:
+    role: 'dns_slave'
+    networks:
+      ens3:
+        subnet: 'core-platform-services'
+        address: '10.25.192.251'
+  puppetca.example.com:
+    role: 'puppet_ca'
+    memory: 4096
+    networks:
+      ens3:
+        subnet: 'core-platform-services'
+        address: '10.25.192.3'
+  puppet0.example.com:
+    role: 'puppet_master'
+    memory: 4096
+    networks:
+      ens3:
+        subnet: 'core-platform-services'
+        address: '10.25.192.4'
+  gateway0.example.com:
+    role: 'gateway'
+    networks:
+      ens3:
+        subnet: 'core-platform-services'
+        address: '10.25.192.5'
+      ens4:
+        subnet: 'core-internet'
+        address: '185.43.217.139'
+        options:
+          - 'post-up ip route replace default via 185.43.217.137'
+          - 'post-up ip route add 10.0.0.0/8 via 10.25.192.1'
+          - 'pre-down ip route del 10.0.0.0/8 via 10.25.192.1'
+          - 'pre-down ip route replace default via 10.25.192.1'
+  gateway1.example.com:
+    role: 'gateway'
+    networks:
+      ens3:
+        subnet: 'core-platform-services'
+        address: '10.25.192.6'
+      ens4:
+        subnet: 'core-internet'
+        address: '185.43.217.140'
+        options:
+          - 'post-up ip route replace default via 185.43.217.137'
+          - 'post-up ip route add 10.0.0.0/8 via 10.25.192.1'
+          - 'pre-down ip route del 10.0.0.0/8 via 10.25.192.1'
+          - 'pre-down ip route replace default via 10.25.192.1'
+  postgres0.example.com:
+    role: 'postgresql_master'
+    memory: 4096
+    networks:
+      ens3:
+        subnet: 'core-platform-services'
+        address: '10.25.192.7'
+  postgres1.example.com:
+    role: 'postgresql_master'
+    memory: 4096
+    networks:
+      ens3:
+        subnet: 'core-platform-services'
+        address: '10.25.192.8'
+  puppetdb0.example.com:
+    role: 'puppetdb'
+    networks:
+      ens3:
+        subnet: 'core-platform-services'
+        address: '10.25.192.9'
+  foreman0.example.com:
+    role: 'foreman'
+    networks:
+      ens3:
+        subnet: 'core-platform-services'
+        address: '10.25.192.10'
+
+# DNS
+# ---
+# DNS objects refer to nameservers for specific domains.  If the nameserver
+# for a domain has been instantiated and a host that domain with a network
+# in a specified subnet then the system will automatically add A and PTR
+# records.  Multi-homed machines which require DNS entried for each network
+# are not supported.
+
+dns:
+  example.com:
+    host: 'ns0.example.com'
+    subnets:
+      - 'core-platform-services'

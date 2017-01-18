@@ -2,13 +2,14 @@
 Copyright (C) 2017 DataCentred Ltd - All Rights Reserved
 """
 
-import ConfigParser
+#import ConfigParser
 
 from pkg_resources import resource_filename
 
 from staging_bootstrap import dns as bs_dns
 from staging_bootstrap import host as bs_host
 from staging_bootstrap import subnet as bs_subnet
+from staging_bootstrap.configure import Configure as configure
 
 # Disable long line warnings
 # pylint: disable=C0301
@@ -50,8 +51,8 @@ def main():
     # Disable too many statements warning
     # pylint: disable=R0915
 
-    config = ConfigParser.ConfigParser()
-    config.read('/etc/default/staging-bootstrap')
+    configure.configure('config.yaml')
+    config = configure.config()
 
     # Create the platform-services network, initially pointing at google for DNS
     #
@@ -124,15 +125,15 @@ def main():
         # Install prerequisite modules
         puppetca.install_puppet_modules('puppetlabs-stdlib')
         # Install manifest prerequisites
-        puppetca.scp(resource_filename('staging_bootstrap', 'files/puppet_ca/hiera.yaml'), '/tmp/hiera.yaml')
-        puppetca.scp(config.get('eyaml', 'public_key'), '/tmp/public_key.pkcs7.pem')
-        puppetca.scp(config.get('eyaml', 'private_key'), '/tmp/private_key.pkcs7.pem')
+        puppetca.scp(resource_filename('staging_bootstrap', 'data/files/puppet_ca/hiera.yaml'), '/tmp/hiera.yaml')
+        puppetca.scp(config.eyaml.public_key, '/tmp/public_key.pkcs7.pem')
+        puppetca.scp(config.eyaml.private_key, '/tmp/private_key.pkcs7.pem')
         # Apply the manifest
         facts = {
-            'deploy_user': config.get('github', 'user'),
-            'deploy_pass': config.get('github', 'pass'),
+            'deploy_user': config.github.username,
+            'deploy_pass': config.github.password,
         }
-        puppetca.puppet_apply(resource_filename('staging_bootstrap', 'manifests/puppet_ca/stage1/manifest.pp'), facts=facts)
+        puppetca.puppet_apply(resource_filename('staging_bootstrap', 'data/manifests/puppet_ca/stage1/manifest.pp'), facts=facts)
 
     # Create a gateway
     #
@@ -146,7 +147,7 @@ def main():
         gateway0.install_puppet()
         gateway0.configure_puppet(PUPPET_CONF_GATEWAY)
         # Configure (hack) public networking
-        gateway0.scp(resource_filename('staging_bootstrap', 'files/gateway/interfaces'), '/tmp/interfaces')
+        gateway0.scp(resource_filename('staging_bootstrap', 'data/files/gateway/interfaces'), '/tmp/interfaces')
         gateway0.ssh('cat /tmp/interfaces >> /etc/network/interfaces')
         gateway0.ssh('ifup ens4')
         # Generate the certificates
@@ -158,10 +159,10 @@ def main():
 
     # Swing puppet behind the load-balancer
     dns.A('puppet.example.com', '10.25.192.2')
-    puppetca.scp(resource_filename('staging_bootstrap', 'files/puppet_ca/auth.conf'), '/tmp/auth.conf')
-    puppetca.scp(resource_filename('staging_bootstrap', 'files/puppet_ca/puppetserver.conf'), '/tmp/puppetserver.conf')
-    puppetca.scp(resource_filename('staging_bootstrap', 'files/puppet_ca/webserver.conf'), '/tmp/webserver.conf')
-    puppetca.puppet_apply(resource_filename('staging_bootstrap', 'manifests/puppet_ca/stage2/manifest.pp'))
+    puppetca.scp(resource_filename('staging_bootstrap', 'data/files/puppet_ca/auth.conf'), '/tmp/auth.conf')
+    puppetca.scp(resource_filename('staging_bootstrap', 'data/files/puppet_ca/puppetserver.conf'), '/tmp/puppetserver.conf')
+    puppetca.scp(resource_filename('staging_bootstrap', 'data/files/puppet_ca/webserver.conf'), '/tmp/webserver.conf')
+    puppetca.puppet_apply(resource_filename('staging_bootstrap', 'data/manifests/puppet_ca/stage2/manifest.pp'))
 
     # Create the postgres master
     #
@@ -209,8 +210,8 @@ def main():
  #   # Imbue puppet with store configs
  #   dns.A('puppetdb.example.com', u'10.25.192.2')
  #   puppetca.ssh('apt-get -y install puppetdb-termini')
- #   puppetca.scp(resource_filename('staging_bootstrap', 'files/puppet_ca/routes.yaml'), '/etc/puppetlabs/puppet/routes.yaml')
- #   puppetca.scp(resource_filename('staging_bootstrap', 'files/puppet_ca/puppetdb.conf'), '/etc/puppetlabs/puppet/puppetdb.conf')
+ #   puppetca.scp(resource_filename('staging_bootstrap', 'data/files/puppet_ca/routes.yaml'), '/etc/puppetlabs/puppet/routes.yaml')
+ #   puppetca.scp(resource_filename('staging_bootstrap', 'data/files/puppet_ca/puppetdb.conf'), '/etc/puppetlabs/puppet/puppetdb.conf')
  #   puppetca.configure_puppet(PUPPET_CONF_SERVER_WITH_PUPPETDB)
  #   puppetca.ssh('systemctl restart puppetserver')
 

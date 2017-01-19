@@ -33,7 +33,7 @@ puppet:
       main:
         dns_alt_names: '*.example.com,*.staging.datacentred.services'
       agent:
-        server: 'puppet.example.com'
+        server: 'puppetca.example.com'
 
 # Subnets
 # -------

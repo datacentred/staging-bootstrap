@@ -21,7 +21,7 @@ class { 'dns':
 } ->
 
 # Flip the resolver over to the local one
-exec { 'sed -i "s/dns-nameservers.*/dns-nameservers 10.25.192.250/" /etc/network/interfaces':
+exec { 'sed -i "s/dns-nameservers.*/dns-nameservers 10.25.192.250 10.25.192.251/" /etc/network/interfaces':
 } ->
 
 exec { 'ifdown ens3':

@@ -2,13 +2,11 @@
 Copyright (C) 2017 DataCentred Ltd - All Rights Reserved
 """
 
-#import ConfigParser
-
 from pkg_resources import resource_filename
 
-from staging_bootstrap.configure import Configure as configure
-from staging_bootstrap.host import Host, host
-from staging_bootstrap.nameserver import nameserver
+from staging_bootstrap import configure, host, nameserver
+from staging_bootstrap.host import Host
+
 
 # Disable long line warnings
 # pylint: disable=C0301
@@ -24,7 +22,7 @@ def main():
     # Disable too many statements warning
     # pylint: disable=R0915
 
-    config = configure.configure('config.yaml')
+    config = configure('config.yaml')
 
     # Create the primary nameserver
     #

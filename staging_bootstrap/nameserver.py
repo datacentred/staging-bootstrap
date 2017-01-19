@@ -44,8 +44,4 @@ class Nameserver(object):
                 host.ssh('echo -e "server 127.0.0.1\nupdate add {} 604800 PTR {}\nsend" | nsupdate -k /etc/bind/rndc.key'.format(arpa, fqdn))
 
 
-def nameserver(domain):
-    return NameserverManager.get(domain)
-
-
 # vi: ts=4 et:

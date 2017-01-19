@@ -304,17 +304,4 @@ class Host(object):
         self.ssh('/opt/puppetlabs/bin/puppet agent --disable')
 
 
-def host(name):
-    """Lazily create a host"""
-    _host = HostManager.get(name)
-    if not _host.exists():
-        _dns = NameserverManager.get(_host.domain)
-        _dns.a(_host.name, _host.address)
-        _dns.ptr(_host.name, _host.address)
-        _host.create()
-        _host.install_puppet()
-        _host.configure_puppet()
-    return _host
-
-
 # vi: ts=4 et:

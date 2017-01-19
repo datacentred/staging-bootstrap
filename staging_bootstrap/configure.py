@@ -4,10 +4,12 @@ Copyright (C) 2017 DataCentred Ltd - All Rights Reserved
 
 import yaml
 
-from staging_bootstrap import dotdict
-from staging_bootstrap import host
-from staging_bootstrap import subnet
-from staging_bootstrap import puppet
+from staging_bootstrap.dotdict import DotDict
+from staging_bootstrap.host import Host
+from staging_bootstrap.host_manager import HostManager
+from staging_bootstrap.nameserver import NameserverManager, Nameserver
+from staging_bootstrap.subnet import SubnetManager, Subnet
+from staging_bootstrap.puppet import PuppetConfigManager, PuppetConfig
 
 class Configure(object):
     """Manages global configuration"""
@@ -22,17 +24,20 @@ class Configure(object):
         for k, v in data['puppet'].items():
             if k == 'config':
                 for name, config in v.items():
-                    puppet.PuppetConfigManager.add(name, config)
+                    PuppetConfigManager.add(name, PuppetConfig(config))
 
         for k, v in data['subnets'].items():
-            subnet.SubnetManager.add(k, subnet.Subnet(v))
+            SubnetManager.add(k, Subnet(v))
 
         for k, v in data['hosts'].items():
             if k == 'defaults':
-                host.Host.defaults = v
+                Host.defaults = v
             else:
-                host.HostManager.add(k, host.Host(k, v))
+                HostManager.add(k, Host(k, v))
 
-        return dotdict.DotDict(data['config'])
+        for k, v in data['dns'].items():
+            NameserverManager.add(k, Nameserver(v))
+
+        return DotDict(data['config'])
 
 # vi: ts=4 et:

@@ -15,6 +15,8 @@ from staging_bootstrap import hypervisor_client
 from staging_bootstrap import preseed_server_client
 from staging_bootstrap.formatter import info
 from staging_bootstrap.formatter import detail
+from staging_bootstrap.host_manager import HostManager
+from staging_bootstrap.nameserver import NameserverManager
 from staging_bootstrap.puppet import PuppetConfigManager
 from staging_bootstrap.subnet import SubnetManager
 from staging_bootstrap.util import wait_for
@@ -53,6 +55,45 @@ class Host(object):
         subnet = SubnetManager.get(network['subnet'])
         return getattr(subnet, name)
 
+    @property
+    def role(self):
+        return self.get_config('role')
+
+    @property
+    def domain(self):
+        return self.name[self.name.index('.')+1:]
+
+    @property
+    def memory(self):
+        return self.get_config('memory')
+
+    @property
+    def disks(self):
+        return self.get_config('disks')
+
+    @property
+    def password(self):
+        return self.get_config('password')
+
+    @property
+    def location(self):
+        return self.get_config('location')
+
+    @property
+    def address(self):
+        return self.get_network_config('address')
+
+    @property
+    def netmask(self):
+        return self.get_network_config('netmask')
+
+    @property
+    def gateway(self):
+        return self.get_network_config('gateway')
+
+    @property
+    def nameservers(self):
+        return self.get_network_config('nameservers')
 
     def exists(self):
         """Check if a host exists"""
@@ -66,32 +107,22 @@ class Host(object):
 
     def create(self):
         """Create a host, blocking until it is provisioned and SSH is running"""
-        memory = self.get_config('memory')
-        disks = self.get_config('disks')
-        password = self.get_config('password')
-        location = self.get_config('location')
-
-        address = self.get_network_config('address')
-        netmask = self.get_network_config('netmask')
-        gateway = self.get_network_config('gateway')
-        vlan = self.get_network_config('vlan')
-        nameservers = self.get_network_config('nameservers')
 
         info('Creating host {} ...'.format(self.name))
-        detail('Memory  {} MB'.format(memory))
-        detail('Disks   {} GB'.format(disks))
-        detail('Address {}'.format(address))
-        detail('Netmask {}'.format(netmask))
-        detail('Gateway {}'.format(gateway))
-        detail('DNS     {}'.format(nameservers))
+        detail('Memory  {} MB'.format(self.memory))
+        detail('Disks   {} GB'.format(self.disks))
+        detail('Address {}'.format(self.address))
+        detail('Netmask {}'.format(self.netmask))
+        detail('Gateway {}'.format(self.gateway))
+        detail('DNS     {}'.format(self.nameservers))
 
         preseed = preseed_server_client.PreseedServerClient('localhost')
         hypervisor = hypervisor_client.HypervisorClient('localhost')
 
         # Create a preseed entry
         metadata = {
-            'root_password': crypt.crypt(password, '$6$salt'),
-            'finish_url': 'http://{}:8421/hosts/{}/finish'.format(gateway, self.name),
+            'root_password': crypt.crypt(self.password, '$6$salt'),
+            'finish_url': 'http://{}:8421/hosts/{}/finish'.format(self.gateway, self.name),
         }
         preseed.host_create(self.name, 'preseed.xenial.erb', 'finish.xenial.erb', metadata)
 
@@ -99,6 +130,7 @@ class Host(object):
         info('Creating networks ...')
         network_names = []
         for network in self.config['networks']:
+            vlan = SubnetManager.get(network['subnet']).vlan
             name = 'vlan:{}'.format(vlan)
             network_names.append(name)
             hypervisor.network_create(name, 'br0', vlan)
@@ -109,22 +141,22 @@ class Host(object):
             'priority=critical',
             'vga=normal',
             'hostname={}'.format(self.name),
-            'domain=example.com',
-            'url=http://{}:8421/hosts/{}/preseed'.format(gateway, self.name),
+            'domain={}'.format(self.domain),
+            'url=http://{}:8421/hosts/{}/preseed'.format(self.gateway, self.name),
             'netcfg/choose_interface=auto',
             'netcfg/disable_autoconfig=true',
-            'netcfg/get_ipaddress={}'.format(address),
-            'netcfg/get_netmask={}'.format(netmask),
-            'netcfg/get_gateway={}'.format(gateway),
-            'netcfg/get_nameservers="{}"'.format(' '.join(nameservers)),
+            'netcfg/get_ipaddress={}'.format(self.address),
+            'netcfg/get_netmask={}'.format(self.netmask),
+            'netcfg/get_gateway={}'.format(self.gateway),
+            'netcfg/get_nameservers="{}"'.format(' '.join(self.nameservers)),
             'netcfg/confirm_static=true'
         ]
 
         # Create the host on the hypervisor
         # This is a non-blocking operation, so we need to poll for completion
         info('Creating host ...')
-        hypervisor.host_create(self.name, memory, disks, network_names,
-                               location, ' '.join(extra_args))
+        hypervisor.host_create(self.name, self.memory, self.disks, network_names,
+                               self.location, ' '.join(extra_args))
         delta = self.wait_for_state(hypervisor, 'shut off')
         detail('Host created in {}s'.format(delta))
 
@@ -152,10 +184,9 @@ class Host(object):
         """Wait for a port to start listening"""
         def cond():
             """Closure to socket state"""
-            address = self.get_network_config('address')
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             try:
-                sock.connect((address, port))
+                sock.connect((self.address, port))
             except IOError:
                 return False
             return True
@@ -173,7 +204,7 @@ class Host(object):
         info('Executing on {}: {}'.format(self.name, command))
         client = paramiko.client.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        client.connect(self.get_network_config('address'), username='root', password=self.get_config('password'))
+        client.connect(self.address, username='root', password=self.password)
         channel = client.get_transport().open_session()
         channel.set_combine_stderr(True)
         channel.exec_command(command)
@@ -193,7 +224,7 @@ class Host(object):
         info('Copying {} to {} on {}'.format(source, target, self.name))
         client = paramiko.client.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        client.connect(self.get_network_config('address'), username='root', password=self.get_config('password'))
+        client.connect(self.address, username='root', password=self.password)
         sftp = client.open_sftp()
         sftp.put(source, target)
 
@@ -241,7 +272,7 @@ class Host(object):
         self.scp(manifest, target)
         command = ''
         if self.facts:
-            command = command + ' '.join(map(lambda x: 'FACTER_{}={}'.format(x, self.facts[x]), self.facts)) + ' '
+            command = command + ' '.join(map(lambda x: 'FACTER_{}={}'.format(x, self.facts[x]))) + ' '
         command = command + '/opt/puppetlabs/bin/puppet apply ' + target
         self.puppet_enable()
         self.ssh(command)
@@ -253,7 +284,7 @@ class Host(object):
 
         command = 'FACTER_role=' + self.get_config('role') + ' '
         if self.facts:
-            command = command + ' '.join(map(lambda x: 'FACTER_{}={}'.format(x, self.facts[x]), self.facts)) + ' '
+            command = command + ' '.join(map(lambda x: 'FACTER_{}={}'.format(x, self.facts[x]))) + ' '
         if self.excludes:
             command = command + 'FACTER_excludes=' + ','.join(self.excludes) + ' '
         command = command + '/opt/puppetlabs/bin/puppet agent --test'
@@ -273,24 +304,13 @@ class Host(object):
         self.ssh('/opt/puppetlabs/bin/puppet agent --disable')
 
 
-class HostManager(object):
-    """Class to manage hosts"""
-
-    hosts = {}
-
-    @classmethod
-    def add(cls, name, _host):
-        cls.hosts[name] = _host
-
-    @classmethod
-    def get(cls, name):
-        return cls.hosts[name]
-
-
 def host(name):
     """Lazily create a host"""
     _host = HostManager.get(name)
     if not _host.exists():
+        _dns = NameserverManager.get(_host.domain)
+        _dns.a(_host.name, _host.address)
+        _dns.ptr(_host.name, _host.address)
         _host.create()
         _host.install_puppet()
         _host.configure_puppet()

@@ -6,9 +6,9 @@ Copyright (C) 2017 DataCentred Ltd - All Rights Reserved
 
 from pkg_resources import resource_filename
 
-from staging_bootstrap import dns as bs_dns
 from staging_bootstrap.configure import Configure as configure
 from staging_bootstrap.host import Host, host
+from staging_bootstrap.nameserver import nameserver
 
 # Disable long line warnings
 # pylint: disable=C0301
@@ -33,9 +33,6 @@ def main():
     host('ns0.example.com').install_puppet_modules('theforeman-dns')
     host('ns0.example.com').puppet_apply(static('data/manifests/dns_master/manifest.pp'))
 
-    # Create the DNS helper
-    dns = bs_dns.DNS(host('ns0.example.com'))
-
     # The CA needs access to these in order to checkout the puppet repo
     Host.facts = {
         'deploy_user': config.github.username,
@@ -43,7 +40,6 @@ def main():
     }
 
     # Create the puppet CA
-    dns.default(host('puppetca.example.com'))
     host('puppetca.example.com').install_puppet_modules('puppetlabs-stdlib')
     host('puppetca.example.com').scp(static('data/files/puppet_ca/hiera.yaml'), '/tmp/hiera.yaml')
     host('puppetca.example.com').scp(config.eyaml.public_key, '/tmp/public_key.pkcs7.pem')
@@ -61,7 +57,6 @@ def main():
     ]
 
     # Create a gateway
-    dns.default(host('gateway0.example.com'))
     host('gateway0.example.com').scp(static('data/files/gateway/interfaces'), '/tmp/interfaces')
     host('gateway0.example.com').ssh('cat /tmp/interfaces >> /etc/network/interfaces')
     host('gateway0.example.com').ssh('ifup ens4')
@@ -70,38 +65,32 @@ def main():
     host('gateway0.example.com').puppet_agent()
 
     # Swing puppet behind the load-balancer
-    dns.A('puppet.example.com', '10.25.192.2')
+    nameserver('example.com').a('puppet.example.com', '10.25.192.2')
     host('puppetca.example.com').scp(static('data/files/puppet_ca/auth.conf'), '/tmp/auth.conf')
     host('puppetca.example.com').scp(static('data/files/puppet_ca/puppetserver.conf'), '/tmp/puppetserver.conf')
     host('puppetca.example.com').scp(static('data/files/puppet_ca/webserver.conf'), '/tmp/webserver.conf')
     host('puppetca.example.com').puppet_apply(static('data/manifests/puppet_ca/stage2/manifest.pp'))
 
     # Create the postgres master
-    dns.default(host('postgres0.example.com'))
     host('postgres0.example.com').puppet_agent()
 
     # Create the postgres slave
-    dns.default(host('postgres1.example.com'))
     host('postgres1.example.com').puppet_agent()
 
     # Create puppetdb
-    dns.default(host('puppetdb0.example.com'))
     host('puppetdb0.example.com').puppet_agent()
 
     # Create foreman
-    dns.default(host('foreman0.example.com'))
     host('foreman0.example.com').puppet_agent()
     host('foreman0.example.com').ssh('foreman-rake permissions:reset password=password')
 
     # Create the secondary nameserver
-    dns.default(host('ns1.example.com'))
     host('ns1.example.com').puppet_agent()
 
     # Bootstrap the primary nameserver fully
     host('ns0.example.com').puppet_agent()
 
     # Create a puppet master
-    dns.default(host('puppet0.example.com'))
     host('puppet0.example.com').puppet_agent()
 
     # Bootstrap the puppet ca fully

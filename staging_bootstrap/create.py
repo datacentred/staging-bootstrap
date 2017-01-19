@@ -13,34 +13,6 @@ from staging_bootstrap.host import Host, host
 # Disable long line warnings
 # pylint: disable=C0301
 
-# Default configuration
-PUPPET_CONF = {
-    'agent': {
-        'server': 'puppet.example.com',
-    },
-}
-
-PUPPET_CONF_SERVER_WITH_PUPPETDB = {
-    'agent': {
-        'server': 'puppet.example.com',
-    },
-    'master': {
-        'storeconfigs': 'true',
-        'storeconfigs_backend': 'puppetdb',
-    },
-}
-
-# Gateway configuration, specifies DNS Alternate Names for X.509 generation
-PUPPET_CONF_GATEWAY = {
-    'main' : {
-        'dns_alt_names': '*.example.com,*.staging.datacentred.services',
-    },
-    'agent': {
-        'server': 'puppetca.example.com',
-    },
-}
-
-
 def static(path):
     """Return the absolute path to a static file"""
     return resource_filename('staging_bootstrap', path)
@@ -58,7 +30,6 @@ def main():
     #
     # Establishes domain authority (e.g. ::domain and ::fqdn work)
     # Allows creation of DNS A and PTR records for hosts
-    host('ns0.example.com').configure_puppet(PUPPET_CONF)
     host('ns0.example.com').install_puppet_modules('theforeman-dns')
     host('ns0.example.com').puppet_apply(static('data/manifests/dns_master/manifest.pp'))
 
@@ -73,7 +44,6 @@ def main():
 
     # Create the puppet CA
     dns.default(host('puppetca.example.com'))
-    host('puppetca.example.com').configure_puppet(PUPPET_CONF)
     host('puppetca.example.com').install_puppet_modules('puppetlabs-stdlib')
     host('puppetca.example.com').scp(static('data/files/puppet_ca/hiera.yaml'), '/tmp/hiera.yaml')
     host('puppetca.example.com').scp(config.eyaml.public_key, '/tmp/public_key.pkcs7.pem')
@@ -92,14 +62,12 @@ def main():
 
     # Create a gateway
     dns.default(host('gateway0.example.com'))
-    host('gateway0.example.com').configure_puppet(PUPPET_CONF_GATEWAY)
     host('gateway0.example.com').scp(static('data/files/gateway/interfaces'), '/tmp/interfaces')
     host('gateway0.example.com').ssh('cat /tmp/interfaces >> /etc/network/interfaces')
     host('gateway0.example.com').ssh('ifup ens4')
     host('gateway0.example.com').ssh('/opt/puppetlabs/bin/puppet agent --test --tags non_existant', acceptable_exitcodes=[1])
     host('puppetca.example.com').ssh('/opt/puppetlabs/bin/puppet cert --allow-dns-alt-names sign gateway0.example.com')
     host('gateway0.example.com').puppet_agent()
-    host('gateway0.example.com').puppet_disable()
 
     # Swing puppet behind the load-balancer
     dns.A('puppet.example.com', '10.25.192.2')
@@ -110,48 +78,34 @@ def main():
 
     # Create the postgres master
     dns.default(host('postgres0.example.com'))
-    host('postgres0.example.com').configure_puppet(PUPPET_CONF)
     host('postgres0.example.com').puppet_agent()
-    host('postgres0.example.com').puppet_disable()
 
     # Create the postgres slave
     dns.default(host('postgres1.example.com'))
-    host('postgres1.example.com').configure_puppet(PUPPET_CONF)
     host('postgres1.example.com').puppet_agent()
-    host('postgres1.example.com').puppet_disable()
 
     # Create puppetdb
     dns.default(host('puppetdb0.example.com'))
-    host('puppetdb0.example.com').configure_puppet(PUPPET_CONF)
     host('puppetdb0.example.com').puppet_agent()
-    host('puppetdb0.example.com').puppet_disable()
 
     # Create foreman
     dns.default(host('foreman0.example.com'))
-    host('foreman0.example.com').configure_puppet(PUPPET_CONF)
     host('foreman0.example.com').puppet_agent()
-    host('foreman0.example.com').puppet_disable()
     host('foreman0.example.com').ssh('foreman-rake permissions:reset password=password')
 
     # Create the secondary nameserver
     dns.default(host('ns1.example.com'))
-    host('ns1.example.com').configure_puppet(PUPPET_CONF)
     host('ns1.example.com').puppet_agent()
-    host('ns1.example.com').puppet_disable()
 
     # Bootstrap the primary nameserver fully
     host('ns0.example.com').puppet_agent()
-    host('ns0.example.com').puppet_disable()
 
     # Create a puppet master
     dns.default(host('puppet0.example.com'))
-    host('puppet0.example.com').configure_puppet(PUPPET_CONF)
     host('puppet0.example.com').puppet_agent()
-    host('puppet0.example.com').puppet_disable()
 
     # Bootstrap the puppet ca fully
     host('puppetca.example.com').puppet_agent()
-    host('puppetca.example.com').puppet_disable()
 
 
 # vi: ts=4 et:

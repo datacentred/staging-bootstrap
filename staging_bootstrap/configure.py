@@ -7,6 +7,7 @@ import yaml
 from staging_bootstrap import dotdict
 from staging_bootstrap import host
 from staging_bootstrap import subnet
+from staging_bootstrap import puppet
 
 class Configure(object):
     """Manages global configuration"""
@@ -17,6 +18,11 @@ class Configure(object):
 
         with open(path, 'r') as conf_file:
             data = yaml.load(conf_file.read())
+
+        for k, v in data['puppet'].items():
+            if k == 'config':
+                for name, config in v.items():
+                    puppet.PuppetConfigManager.add(name, config)
 
         for k, v in data['subnets'].items():
             subnet.SubnetManager.add(k, subnet.Subnet(v))

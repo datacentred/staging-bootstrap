@@ -15,6 +15,7 @@ from staging_bootstrap import hypervisor_client
 from staging_bootstrap import preseed_server_client
 from staging_bootstrap.formatter import info
 from staging_bootstrap.formatter import detail
+from staging_bootstrap.puppet import PuppetConfigManager
 from staging_bootstrap.subnet import SubnetManager
 from staging_bootstrap.util import wait_for
 
@@ -206,20 +207,22 @@ class Host(object):
         self.ssh(r'apt-get update')
         self.ssh(r'echo START=no > /etc/default/puppet')
         self.ssh(r'apt-get -y -o DPkg::Options::=--force-confold install puppet-agent')
+        self.puppet_disable()
         # Temporary hack for Icinga 2 (prevents restarts and box death!)
         self.ssh(r'mkdir -p /var/lib/puppet')
         self.ssh(r'ln -s /etc/puppetlabs/puppet/ssl /var/lib/puppet')
 
 
-    def configure_puppet(self, config):
+    def configure_puppet(self):
         """Configure puppet"""
-
-        text = ''
-        for section in config:
-            text += "[{}]\n".format(section)
-            for option in config[section]:
-                text += "{} = {}\n".format(option, config[section][option])
-        self.ssh('echo \'{}\' > /etc/puppetlabs/puppet/puppet.conf'.format(text))
+        config = PuppetConfigManager.get(self.name)
+        if config == None:
+            config = PuppetConfigManager.get(self.role)
+        if config == None:
+            config = PuppetConfigManager.get('default')
+        if config == None:
+            raise RuntimeError
+        self.ssh('echo \'{}\' > /etc/puppetlabs/puppet/puppet.conf'.format(config.config))
 
 
     def install_puppet_modules(self, modules):
@@ -240,7 +243,9 @@ class Host(object):
         if self.facts:
             command = command + ' '.join(map(lambda x: 'FACTER_{}={}'.format(x, self.facts[x]), self.facts)) + ' '
         command = command + '/opt/puppetlabs/bin/puppet apply ' + target
+        self.puppet_enable()
         self.ssh(command)
+        self.puppet_disable()
 
 
     def puppet_agent(self):
@@ -252,7 +257,14 @@ class Host(object):
         if self.excludes:
             command = command + 'FACTER_excludes=' + ','.join(self.excludes) + ' '
         command = command + '/opt/puppetlabs/bin/puppet agent --test'
+        self.puppet_enable()
         self.ssh(command, acceptable_exitcodes=[0, 2])
+        self.puppet_disable()
+
+    def puppet_enable(self):
+        """Enable puppet runs"""
+
+        self.ssh('/opt/puppetlabs/bin/puppet agent --enable')
 
 
     def puppet_disable(self):
@@ -281,6 +293,7 @@ def host(name):
     if not _host.exists():
         _host.create()
         _host.install_puppet()
+        _host.configure_puppet()
     return _host
 
 

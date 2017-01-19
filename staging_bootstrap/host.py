@@ -3,8 +3,8 @@ Copyright (C) 2017 DataCentred Ltd - All Rights Reserved
 """
 
 import socket
-import subprocess
 import sys
+import time
 
 # 3rd party imports
 import crypt
@@ -15,8 +15,6 @@ from staging_bootstrap import hypervisor_client
 from staging_bootstrap import preseed_server_client
 from staging_bootstrap.formatter import info
 from staging_bootstrap.formatter import detail
-from staging_bootstrap.host_manager import HostManager
-from staging_bootstrap.nameserver_manager import NameserverManager
 from staging_bootstrap.puppet_config_manager import PuppetConfigManager
 from staging_bootstrap.subnet_manager import SubnetManager
 from staging_bootstrap.util import wait_for
@@ -109,7 +107,7 @@ class Host(object):
 
 
     def create_networks(self, hypervisor):
-        """Creates networks on the hypervisor, returns names and metadata for the hypervisor agent"""
+        """Creates networks on the hypervisor and returns metadata"""
 
         names = []
         metadata = []
@@ -129,7 +127,7 @@ class Host(object):
             # Calculate the network name and append to the list for creation
             vlan = SubnetManager.get(network['subnet']).vlan
             name = 'vlan:{}'.format(vlan)
-            info(name)
+            detail(name)
             names.append(name)
 
             # Create the network if it doesn't exist
@@ -237,11 +235,12 @@ class Host(object):
         channel = client.get_transport().open_session()
         channel.set_combine_stderr(True)
         channel.exec_command(command)
-        while True:
-            if channel.recv_ready():
+        while not channel.exit_status_ready():
+            while channel.recv_ready():
                 sys.stdout.write(channel.recv(8192))
-            if channel.exit_status_ready():
-                break
+            time.sleep(0.1)
+        while channel.recv_ready():
+            sys.stdout.write(channel.recv(8192))
         detail("Exited with status {}".format(channel.recv_exit_status()))
         if channel.recv_exit_status() not in acceptable_exitcodes:
             raise RuntimeError('command execution failed')
@@ -276,11 +275,11 @@ class Host(object):
     def configure_puppet(self):
         """Configure puppet"""
         config = PuppetConfigManager.get(self.name)
-        if config == None:
+        if config is None:
             config = PuppetConfigManager.get(self.role)
-        if config == None:
+        if config is None:
             config = PuppetConfigManager.get('default')
-        if config == None:
+        if config is None:
             raise RuntimeError
         self.ssh('echo \'{}\' > /etc/puppetlabs/puppet/puppet.conf'.format(config.config))
 

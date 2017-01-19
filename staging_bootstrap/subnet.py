@@ -19,12 +19,12 @@ class Subnet(object):
     @property
     def prefix(self):
         """Return the network prefix in dotted decimal notation"""
-        return ipaddress.IPv4Network(unicode(self._cidr)).network_address
+        return ipaddress.IPv4Network(unicode(self._cidr)).network_address.exploded
 
     @property
     def netmask(self):
         """Return the netmask in dotted decimal notation"""
-        return ipaddress.IPv4Network(unicode(self._cidr)).netmask
+        return ipaddress.IPv4Network(unicode(self._cidr)).netmask.exploded
 
     @property
     def vlan(self):

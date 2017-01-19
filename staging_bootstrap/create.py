@@ -55,9 +55,6 @@ def main():
     ]
 
     # Create a gateway
-    host('gateway0.example.com').scp(static('data/files/gateway/interfaces'), '/tmp/interfaces')
-    host('gateway0.example.com').ssh('cat /tmp/interfaces >> /etc/network/interfaces')
-    host('gateway0.example.com').ssh('ifup ens4')
     host('gateway0.example.com').ssh('/opt/puppetlabs/bin/puppet agent --test --tags non_existant', acceptable_exitcodes=[1])
     host('puppetca.example.com').ssh('/opt/puppetlabs/bin/puppet cert --allow-dns-alt-names sign gateway0.example.com')
     host('gateway0.example.com').puppet_agent()

@@ -46,14 +46,17 @@ class Host(object):
         return self.defaults[name]
 
 
-    def get_network_config(self, name):
+    def get_network_config(self, name, index=0):
         """Gets network config prefering instance parameters over subnet"""
-        network = self.config['networks'][0]
+        network = self.config['networks'][index]
         if name in network:
             return network[name]
 
         subnet = SubnetManager.get(network['subnet'])
-        return getattr(subnet, name)
+        try:
+            return getattr(subnet, name)
+        except AttributeError:
+            return None
 
     @property
     def role(self):
@@ -105,6 +108,36 @@ class Host(object):
         return True
 
 
+    def create_networks(self, hypervisor):
+        """Creates networks on the hypervisor, returns names and metadata for the hypervisor agent"""
+
+        names = []
+        metadata = []
+        for index, network in enumerate(self.config['networks']):
+            subnet = SubnetManager.get(network['subnet'])
+
+            # Extract static network configuration from host network and subnet objects
+            metadata.append({
+                'interface': network['interface'],
+                'address': network['address'],
+                'netmask': subnet.netmask,
+                'gateway': self.get_network_config('gateway', index),
+                'nameservers': self.get_network_config('nameservers', index),
+                'options': self.get_network_config('options', index),
+            })
+
+            # Calculate the network name and append to the list for creation
+            vlan = SubnetManager.get(network['subnet']).vlan
+            name = 'vlan:{}'.format(vlan)
+            info(name)
+            names.append(name)
+
+            # Create the network if it doesn't exist
+            hypervisor.network_create(name, 'br0', vlan)
+
+        return names, metadata
+
+
     def create(self):
         """Create a host, blocking until it is provisioned and SSH is running"""
 
@@ -119,21 +152,17 @@ class Host(object):
         preseed = preseed_server_client.PreseedServerClient('localhost')
         hypervisor = hypervisor_client.HypervisorClient('localhost')
 
+        # Create networks on the hypervisor
+        info('Creating networks ...')
+        network_names, network_metadata = self.create_networks(hypervisor)
+
         # Create a preseed entry
         metadata = {
             'root_password': crypt.crypt(self.password, '$6$salt'),
             'finish_url': 'http://{}:8421/hosts/{}/finish'.format(self.gateway, self.name),
+            'networks': network_metadata,
         }
         preseed.host_create(self.name, 'preseed.xenial.erb', 'finish.xenial.erb', metadata)
-
-        # Create networks on the hypervisor
-        info('Creating networks ...')
-        network_names = []
-        for network in self.config['networks']:
-            vlan = SubnetManager.get(network['subnet']).vlan
-            name = 'vlan:{}'.format(vlan)
-            network_names.append(name)
-            hypervisor.network_create(name, 'br0', vlan)
 
         # Set the preseed kernel command line parameters, mostly static network options
         extra_args = [

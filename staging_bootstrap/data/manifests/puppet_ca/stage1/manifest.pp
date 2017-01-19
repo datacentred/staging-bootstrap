@@ -105,23 +105,27 @@ file { '/etc/puppetlabs/code/environments':
 
 # WARNING: puppet cert generate stealthily creates this which bones git
 exec { 'rm -rf /etc/puppetlabs/code/environments/production':
-} ->
+  unless => 'ls /etc/puppetlabs/code/environments/production/hieradata',
+} ~>
 
 exec { "git clone https://${deploy_user}:${deploy_pass}@github.com/datacentred/puppet production":
-  user    => 'puppet',
-  cwd     => '/etc/puppetlabs/code/environments',
-  timeout => 3600,
-} ->
+  user        => 'puppet',
+  cwd         => '/etc/puppetlabs/code/environments',
+  timeout     => 3600,
+  refreshonly => true,
+} ~>
 
 exec { 'git submodule init':
-  user => 'puppet',
-  cwd  => '/etc/puppetlabs/code/environments/production',
-} ->
+  user        => 'puppet',
+  cwd         => '/etc/puppetlabs/code/environments/production',
+  refreshonly => true,
+} ~>
 
 exec { 'git submodule update':
-  user    => 'puppet',
-  cwd     => '/etc/puppetlabs/code/environments/production',
-  timeout => 3600,
+  user        => 'puppet',
+  cwd         => '/etc/puppetlabs/code/environments/production',
+  timeout     => 3600,
+  refreshonly => true,
 } ->
 
 file { '/etc/puppetlabs/puppet/hiera.yaml':

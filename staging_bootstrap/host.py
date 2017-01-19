@@ -16,9 +16,9 @@ from staging_bootstrap import preseed_server_client
 from staging_bootstrap.formatter import info
 from staging_bootstrap.formatter import detail
 from staging_bootstrap.host_manager import HostManager
-from staging_bootstrap.nameserver import NameserverManager
-from staging_bootstrap.puppet import PuppetConfigManager
-from staging_bootstrap.subnet import SubnetManager
+from staging_bootstrap.nameserver_manager import NameserverManager
+from staging_bootstrap.puppet_config_manager import PuppetConfigManager
+from staging_bootstrap.subnet_manager import SubnetManager
 from staging_bootstrap.util import wait_for
 
 
@@ -272,7 +272,7 @@ class Host(object):
         self.scp(manifest, target)
         command = ''
         if self.facts:
-            command = command + ' '.join(map(lambda x: 'FACTER_{}={}'.format(x, self.facts[x]))) + ' '
+            command = command + ' '.join(map(lambda x: 'FACTER_{}={}'.format(x, self.facts[x]), self.facts)) + ' '
         command = command + '/opt/puppetlabs/bin/puppet apply ' + target
         self.puppet_enable()
         self.ssh(command)
@@ -284,7 +284,7 @@ class Host(object):
 
         command = 'FACTER_role=' + self.get_config('role') + ' '
         if self.facts:
-            command = command + ' '.join(map(lambda x: 'FACTER_{}={}'.format(x, self.facts[x]))) + ' '
+            command = command + ' '.join(map(lambda x: 'FACTER_{}={}'.format(x, self.facts[x]), self.facts)) + ' '
         if self.excludes:
             command = command + 'FACTER_excludes=' + ','.join(self.excludes) + ' '
         command = command + '/opt/puppetlabs/bin/puppet agent --test'

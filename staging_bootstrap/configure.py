@@ -7,9 +7,12 @@ import yaml
 from staging_bootstrap.dotdict import DotDict
 from staging_bootstrap.host import Host
 from staging_bootstrap.host_manager import HostManager
-from staging_bootstrap.nameserver import NameserverManager, Nameserver
-from staging_bootstrap.subnet import SubnetManager, Subnet
-from staging_bootstrap.puppet import PuppetConfigManager, PuppetConfig
+from staging_bootstrap.nameserver import Nameserver
+from staging_bootstrap.nameserver_manager import NameserverManager
+from staging_bootstrap.subnet import Subnet
+from staging_bootstrap.subnet_manager import SubnetManager
+from staging_bootstrap.puppet_config import PuppetConfig
+from staging_bootstrap.puppet_config_manager import PuppetConfigManager
 
 class Configure(object):
     """Manages global configuration"""

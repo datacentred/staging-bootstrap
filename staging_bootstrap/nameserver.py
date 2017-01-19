@@ -44,19 +44,6 @@ class Nameserver(object):
                 host.ssh('echo -e "server 127.0.0.1\nupdate add {} 604800 PTR {}\nsend" | nsupdate -k /etc/bind/rndc.key'.format(arpa, fqdn))
 
 
-class NameserverManager(object):
-
-    nameservers = {}
-
-    @classmethod
-    def add(cls, name, nameserver):
-        cls.nameservers[name] = nameserver
-
-    @classmethod
-    def get(cls, name):
-        return cls.nameservers[name]
-
-
 def nameserver(domain):
     return NameserverManager.get(domain)
 

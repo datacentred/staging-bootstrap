@@ -13,24 +13,23 @@ import paramiko
 # Local imports
 from staging_bootstrap import hypervisor_client
 from staging_bootstrap import preseed_server_client
-from staging_bootstrap.configure import Configure as configure
 from staging_bootstrap.formatter import info
 from staging_bootstrap.formatter import detail
+from staging_bootstrap.subnet import SubnetManager
 from staging_bootstrap.util import wait_for
 
 
 class Host(object):
     """Container for a host object"""
 
-    # Class variable to hold install location
-    defaults = {
-        'memory': 512,
-        'disks': [
-            8,
-        ],
-        'password': 'password',
-        'location': 'http://gb.archive.ubuntu.com/ubuntu/dists/xenial/main/installer-amd64',
-    }
+    # Class varaible to hold default parameters
+    defaults = {}
+
+    # Class variable to hold default facts
+    facts = {}
+
+    # Class variable to hold default class excludes
+    excludes = {}
 
     def __init__(self, name, value):
         self.name = name
@@ -38,24 +37,24 @@ class Host(object):
 
 
     def get_config(self, name):
+        """Gets host configuration prefering instance parameters over class"""
         if name in self.config:
             return self.config[name]
         return self.defaults[name]
 
 
     def get_network_config(self, name):
+        """Gets network config prefering instance parameters over subnet"""
         network = self.config['networks'][0]
         if name in network:
             return network[name]
 
-        subnets = configure.subnets()
-        subnet = subnets[network['subnet']]
+        subnet = SubnetManager.get(network['subnet'])
         return getattr(subnet, name)
 
 
     def exists(self):
         """Check if a host exists"""
-
         hypervisor = hypervisor_client.HypervisorClient('localhost')
         try:
             hypervisor.host_get(self.name)
@@ -66,7 +65,6 @@ class Host(object):
 
     def create(self):
         """Create a host, blocking until it is provisioned and SSH is running"""
-
         memory = self.get_config('memory')
         disks = self.get_config('disks')
         password = self.get_config('password')
@@ -99,7 +97,6 @@ class Host(object):
         # Create networks on the hypervisor
         info('Creating networks ...')
         network_names = []
-        subnets = configure.subnets()
         for network in self.config['networks']:
             name = 'vlan:{}'.format(vlan)
             network_names.append(name)
@@ -234,26 +231,26 @@ class Host(object):
             self.ssh(r'/opt/puppetlabs/bin/puppet module install {}'.format(module))
 
 
-    def puppet_apply(self, manifest, **kwargs):
+    def puppet_apply(self, manifest):
         """Transfer and apply a manifest"""
 
         target = '/tmp/manifest.pp'
         self.scp(manifest, target)
         command = ''
-        if 'facts' in kwargs:
-            command = ' '.join(('FACTER_' + x + '=' + kwargs['facts'][x] for x in kwargs['facts'])) + ' '
+        if self.facts:
+            command = command + ' '.join(map(lambda x: 'FACTER_{}={}'.format(x, self.facts[x]), self.facts)) + ' '
         command = command + '/opt/puppetlabs/bin/puppet apply ' + target
         self.ssh(command)
 
 
-    def puppet_agent(self, role, **kwargs):
+    def puppet_agent(self):
         """Run puppet against the master specifying role and excluded classes"""
 
-        command = 'FACTER_role=' + role + ' '
-        if 'facts' in kwargs:
-            command = command + ' '.join(('FACTER_' + x + '=' + kwargs['facts'][x] for x in kwargs['facts'])) + ' '
-        if 'excludes' in kwargs:
-            command = command + 'FACTER_excludes=' + ','.join(kwargs['excludes']) + ' '
+        command = 'FACTER_role=' + self.get_config('role') + ' '
+        if self.facts:
+            command = command + ' '.join(map(lambda x: 'FACTER_{}={}'.format(x, self.facts[x]), self.facts)) + ' '
+        if self.excludes:
+            command = command + 'FACTER_excludes=' + ','.join(self.excludes) + ' '
         command = command + '/opt/puppetlabs/bin/puppet agent --test'
         self.ssh(command, acceptable_exitcodes=[0, 2])
 
@@ -262,6 +259,29 @@ class Host(object):
         """Disable automatic puppet runs"""
 
         self.ssh('/opt/puppetlabs/bin/puppet agent --disable')
+
+
+class HostManager(object):
+    """Class to manage hosts"""
+
+    hosts = {}
+
+    @classmethod
+    def add(cls, name, _host):
+        cls.hosts[name] = _host
+
+    @classmethod
+    def get(cls, name):
+        return cls.hosts[name]
+
+
+def host(name):
+    """Lazily create a host"""
+    _host = HostManager.get(name)
+    if not _host.exists():
+        _host.create()
+        _host.install_puppet()
+    return _host
 
 
 # vi: ts=4 et:

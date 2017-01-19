@@ -5,6 +5,7 @@ Copyright (C) 2017 DataCentred Ltd - All Rights Reserved
 import yaml
 
 from staging_bootstrap import dotdict
+from staging_bootstrap import host
 from staging_bootstrap import subnet
 
 class Configure(object):
@@ -17,20 +18,15 @@ class Configure(object):
         with open(path, 'r') as conf_file:
             data = yaml.load(conf_file.read())
 
-        cls._config = dotdict.DotDict(data['config'])
-
-        cls._subnets = {}
         for k, v in data['subnets'].items():
-            cls._subnets[k] = subnet.Subnet(v)
+            subnet.SubnetManager.add(k, subnet.Subnet(v))
 
-    @classmethod
-    def config(cls):
-        """Return the configuration dictionary"""
-        return cls._config
+        for k, v in data['hosts'].items():
+            if k == 'defaults':
+                host.Host.defaults = v
+            else:
+                host.HostManager.add(k, host.Host(k, v))
 
-    @classmethod
-    def subnets(cls):
-        """Return the subnet dictionary"""
-        return cls._subnets
+        return dotdict.DotDict(data['config'])
 
 # vi: ts=4 et:

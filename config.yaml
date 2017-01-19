@@ -115,6 +115,7 @@ hosts:
         subnet: 'core-internet'
         address: '185.43.217.139'
         options:
+          - 'pre-up sleep 1'
           - 'post-up ip route replace default via 185.43.217.137'
           - 'post-up ip route add 10.0.0.0/8 via 10.25.192.1'
           - 'pre-down ip route del 10.0.0.0/8 via 10.25.192.1'
@@ -129,6 +130,7 @@ hosts:
         subnet: 'core-internet'
         address: '185.43.217.140'
         options:
+          - 'pre-up sleep 1'
           - 'post-up ip route replace default via 185.43.217.137'
           - 'post-up ip route add 10.0.0.0/8 via 10.25.192.1'
           - 'pre-down ip route del 10.0.0.0/8 via 10.25.192.1'

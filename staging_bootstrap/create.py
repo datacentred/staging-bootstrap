@@ -79,17 +79,24 @@ def main():
     host('foreman0.example.com').puppet_agent()
     host('foreman0.example.com').ssh('foreman-rake permissions:reset password=password')
 
-    # Create the secondary nameserver
-    host('ns1.example.com').puppet_agent()
-
     # Bootstrap the primary nameserver fully
     host('ns0.example.com').puppet_agent()
 
+    # Create the secondary nameserver
+    host('ns1.example.com').puppet_agent()
+
     # Create a puppet master
+    #
+    # Must happen before the CA comes up so lsyncd has a target to populate
+    # Inhibit port 8140 also so it doesn't start to try serving requests
+    host('puppet0.example.com').ssh('iptables -t filter -A INPUT -p tcp --dport 8140 -j DROP')
     host('puppet0.example.com').puppet_agent()
 
     # Bootstrap the puppet ca fully
     host('puppetca.example.com').puppet_agent()
+
+    # Both masters are setup to use puppetdb and foreman reports allow requests to puppet0
+    host('puppet0.example.com').ssh('iptables -t filter -D INPUT -p tcp --dport 8140 -j DROP')
 
 
 # vi: ts=4 et:

@@ -105,7 +105,7 @@ file { '/etc/puppetlabs/code/environments':
 
 # WARNING: puppet cert generate stealthily creates this which bones git
 exec { 'rm -rf /etc/puppetlabs/code/environments/production':
-  unless => 'ls /etc/puppetlabs/code/environments/production/hieradata',
+  unless => 'ls /etc/puppetlabs/code/environments/production/README.md',
 } ~>
 
 exec { "git clone https://${deploy_user}:${deploy_pass}@github.com/datacentred/puppet production":

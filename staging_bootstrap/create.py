@@ -73,6 +73,7 @@ def main():
     host('postgres1.example.com').puppet_agent()
 
     # Create puppetdb
+    nameserver('example.com').a('puppetdb.example.com', '10.25.192.2')
     host('puppetdb0.example.com').puppet_agent()
 
     # Create foreman
@@ -87,10 +88,14 @@ def main():
 
     # Create a puppet master
     #
-    # Must happen before the CA comes up so lsyncd has a target to populate
     # Inhibit port 8140 also so it doesn't start to try serving requests
+    # Must happen before the CA comes up so lsyncd has a target to populate
+    # Also remove the code directory which gets created for us
+    host('puppet0.example.com').ssh('apt-get -y install iptables')
     host('puppet0.example.com').ssh('iptables -t filter -A INPUT -p tcp --dport 8140 -j DROP')
     host('puppet0.example.com').puppet_agent()
+    host('puppet0.example.com').ssh('rm -rf /etc/puppetlabs/code/*')
+    host('puppet0.example.com').ssh('chown puppet:puppet /etc/puppetlabs/code')
 
     # Bootstrap the puppet ca fully
     host('puppetca.example.com').puppet_agent()

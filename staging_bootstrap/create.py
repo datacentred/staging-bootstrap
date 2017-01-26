@@ -89,8 +89,7 @@ def main():
     # Create a puppet master
     #
     # Inhibit port 8140 also so it doesn't start to try serving requests
-    # Must happen before the CA comes up so lsyncd has a target to populate
-    # Also remove the code directory which gets created for us
+    # Also remove the code directory which gets created for us for use by the CA's lsyncd
     host('puppet0.example.com').ssh('apt-get -y install iptables')
     host('puppet0.example.com').ssh('iptables -t filter -A INPUT -p tcp --dport 8140 -j DROP')
     host('puppet0.example.com').puppet_agent()

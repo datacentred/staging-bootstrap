@@ -157,6 +157,7 @@ hosts:
         address: '10.25.192.9'
   foreman0.example.com:
     role: 'foreman'
+    memory: 2048
     networks:
       - interface: 'ens3'
         subnet: 'core-platform-services'
